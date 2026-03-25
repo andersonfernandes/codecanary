@@ -439,8 +439,10 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 		}
 		comment := node.Comments.Nodes[0]
 
-		// Filter to review threads only.
-		if !strings.Contains(comment.Body, "codecanary fix") && !strings.Contains(comment.Body, "clanopy fix") {
+		// Filter to review threads only (new marker + legacy markers for backward compat).
+		if !strings.Contains(comment.Body, "codecanary:finding") &&
+			!strings.Contains(comment.Body, "codecanary fix") &&
+			!strings.Contains(comment.Body, "clanopy fix") {
 			continue
 		}
 
@@ -628,7 +630,7 @@ func PostCleanReview(repo string, prNumber int) error {
 // PostAllClearReview posts a review when all previous findings have been resolved.
 // If minimizeFailed is true, a note is appended warning about visible old reviews.
 func PostAllClearReview(repo string, prNumber int, minimizeFailed bool) error {
-	body := "## CodeCanary Review\n\nAll previous findings have been addressed. No new issues found. \u2728"
+	body := "## \U0001F425 CodeCanary\n\n\u2705 All previous findings have been addressed. No new issues found. \u2728"
 	if minimizeFailed {
 		body += "\n\n> \u26A0\uFE0F Some previous review comments could not be minimized and may still be visible."
 	}
