@@ -3,6 +3,13 @@ set -eu
 
 REPO="alansikora/codecanary"
 BINARY="codecanary-setup"
+CANARY=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --canary) CANARY=true ;;
+  esac
+done
 
 cleanup() { rm -rf "$TMPDIR"; }
 trap cleanup EXIT INT TERM
@@ -15,10 +22,15 @@ case "$ARCH" in
   aarch64|arm64) ARCH="arm64" ;;
 esac
 
-TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"v//' | sed 's/".*//')
+if [ "$CANARY" = true ]; then
+  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases" | grep '"tag_name"' | head -1 | sed 's/.*"v//' | sed 's/".*//')
+  echo "Downloading CodeCanary Setup v${TAG} (canary)..."
+else
+  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"v//' | sed 's/".*//')
+  echo "Downloading CodeCanary Setup v${TAG}..."
+fi
 URL="https://github.com/$REPO/releases/download/v${TAG}/codecanary-setup_${TAG}_${OS}_${ARCH}.tar.gz"
 
-echo "Downloading CodeCanary Setup v${TAG}..."
 curl -fsSL "$URL" | tar -xz -C "$TMPDIR" "$BINARY"
 chmod +x "$TMPDIR/$BINARY"
 "$TMPDIR/$BINARY" "$@" < /dev/tty
