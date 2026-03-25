@@ -439,8 +439,10 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 		}
 		comment := node.Comments.Nodes[0]
 
-		// Filter to review threads only.
-		if !strings.Contains(comment.Body, "codecanary fix") && !strings.Contains(comment.Body, "clanopy fix") {
+		// Filter to review threads only (new marker + legacy markers for backward compat).
+		if !strings.Contains(comment.Body, "codecanary:finding") &&
+			!strings.Contains(comment.Body, "codecanary fix") &&
+			!strings.Contains(comment.Body, "clanopy fix") {
 			continue
 		}
 

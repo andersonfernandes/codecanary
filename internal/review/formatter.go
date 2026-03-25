@@ -183,6 +183,7 @@ func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string
 func FormatFindingComment(f *Finding) string {
 	var b strings.Builder
 
+	b.WriteString("<!-- codecanary:finding -->\n")
 	icon := severityIcon(f.Severity)
 	fmt.Fprintf(&b, "%s **%s** \u2014 `%s`\n\n", icon, f.Severity, f.ID)
 	fmt.Fprintf(&b, "%s\n", f.Description)
@@ -190,7 +191,6 @@ func FormatFindingComment(f *Finding) string {
 	if f.Suggestion != "" {
 		fmt.Fprintf(&b, "\n> **Suggestion**: %s\n", f.Suggestion)
 	}
-
 
 	return b.String()
 }
