@@ -1,5 +1,8 @@
+# Build artifacts
 codecanary
 /review
 /setup
 dist/
+
+# Dependencies
 worker/node_modules/
