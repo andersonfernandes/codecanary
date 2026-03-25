@@ -76,7 +76,7 @@ func run() error {
 		authEnv = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
 	}
 
-	workflow := fmt.Sprintf(`name: CodeCanary Review
+	workflow := fmt.Sprintf(`name: CodeCanary
 on:
   pull_request:
     types: [opened, synchronize]
