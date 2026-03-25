@@ -74,7 +74,7 @@ func FormatMarkdown(result *ReviewResult) string {
 	// Sort findings by severity.
 	sortFindings(result.Findings)
 
-	fmt.Fprintf(&b, "## CodeCanary Review: PR #%d\n\n", result.PRNumber)
+	fmt.Fprintf(&b, "## \U0001F425 CodeCanary \u2014 PR #%d\n\n", result.PRNumber)
 
 	// Summary section.
 	if result.Summary != "" {
@@ -97,11 +97,6 @@ func FormatMarkdown(result *ReviewResult) string {
 			fmt.Fprintf(&b, "\n> **Suggestion**: %s\n", f.Suggestion)
 		}
 
-		if f.FixRef != "" {
-			b.WriteString("\n<details><summary>Fix this issue</summary>\n\n")
-			fmt.Fprintf(&b, "```\ncodecanary fix %s\n```\n\n", f.FixRef)
-			b.WriteString("</details>\n")
-		}
 	}
 
 	// Embed review data as hidden HTML comment for review data extraction.
@@ -137,7 +132,7 @@ func buildSeveritySummary(findings []Finding) string {
 func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "## CodeCanary Review: PR #%d\n\n", result.PRNumber)
+	fmt.Fprintf(&b, "## \U0001F425 CodeCanary \u2014 PR #%d\n\n", result.PRNumber)
 
 	// Summary section.
 	if result.Summary != "" {
@@ -157,7 +152,7 @@ func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string
 		}
 	}
 	if hasInline {
-		b.WriteString("\nSee inline comments for details.\n")
+		b.WriteString("\n\U0001F4AC See inline comments for details.\n")
 	}
 
 	// Include findings that cannot be posted inline.
@@ -170,11 +165,6 @@ func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string
 			fmt.Fprintf(&b, "%s\n", f.Description)
 			if f.Suggestion != "" {
 				fmt.Fprintf(&b, "\n> **Suggestion**: %s\n", f.Suggestion)
-			}
-			if f.FixRef != "" {
-				b.WriteString("\n<details><summary>Fix locally</summary>\n\n")
-				fmt.Fprintf(&b, "```\ncodecanary fix %s\n```\n\n", f.FixRef)
-				b.WriteString("</details>\n")
 			}
 		}
 	}
@@ -201,11 +191,6 @@ func FormatFindingComment(f *Finding) string {
 		fmt.Fprintf(&b, "\n> **Suggestion**: %s\n", f.Suggestion)
 	}
 
-	if f.FixRef != "" {
-		b.WriteString("\n<details><summary>Fix locally</summary>\n\n")
-		fmt.Fprintf(&b, "```\ncodecanary fix %s\n```\n\n", f.FixRef)
-		b.WriteString("</details>\n")
-	}
 
 	return b.String()
 }

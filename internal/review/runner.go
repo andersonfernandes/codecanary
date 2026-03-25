@@ -168,7 +168,7 @@ func Run(opts RunOptions) error {
 		fmt.Fprintf(os.Stderr, "Setup PR detected — skipping review\n")
 		if opts.Post {
 			if err := PostComment(repo, opts.PRNumber,
-				"## CodeCanary Review\n\nSetup PR detected — skipping automated review. Future PRs will be reviewed automatically."); err != nil {
+				"## \U0001F425 CodeCanary\n\nSetup PR detected \u2014 skipping automated review. Future PRs will be reviewed automatically. \U0001F389"); err != nil {
 				return fmt.Errorf("posting setup PR comment: %w", err)
 			}
 		}
