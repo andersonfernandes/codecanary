@@ -23,8 +23,22 @@ func main() {
 	}
 }
 
+func hasFlag(name string) bool {
+	for _, arg := range os.Args[1:] {
+		if arg == name {
+			return true
+		}
+	}
+	return false
+}
+
 func run() error {
-	fmt.Fprintf(os.Stderr, "CodeCanary Setup %s\n\n", version)
+	canary := hasFlag("--canary")
+	if canary {
+		fmt.Fprintf(os.Stderr, "CodeCanary Setup %s (canary)\n\n", version)
+	} else {
+		fmt.Fprintf(os.Stderr, "CodeCanary Setup %s\n\n", version)
+	}
 
 	// Ensure stdin is a terminal so interactive prompts work.
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -74,7 +88,12 @@ func run() error {
 
 	// 6. Create workflow file.
 	workflowDir := filepath.Join(".github", "workflows")
-	workflowPath := filepath.Join(workflowDir, "codecanary-bot.yml")
+	workflowPath := filepath.Join(workflowDir, "codecanary.yml")
+
+	actionRef := "v1"
+	if canary {
+		actionRef = "canary"
+	}
 
 	var authEnv string
 	if secretName == "ANTHROPIC_API_KEY" {
@@ -128,12 +147,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: alansikora/codecanary-action@v1
+      - uses: alansikora/codecanary-action@%s
         with:
 %s
           config_path: .codecanary.yml
           reply_only: ${{ github.event_name == 'pull_request_review_comment' }}
-`, authEnv)
+`, actionRef, authEnv)
 
 	if err := os.MkdirAll(workflowDir, 0755); err != nil {
 		return fmt.Errorf("creating workflow directory: %w", err)
@@ -154,9 +173,16 @@ jobs:
 	// 7. Generate review config.
 	configPath := ".codecanary.yml"
 	configCreated := false
+	generateConfig := true
 	if _, err := os.Stat(configPath); err == nil {
-		fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", configPath)
-	} else {
+		fmt.Fprintf(os.Stderr, "  %s already exists. Re-generate? [y/N] ", configPath)
+		answer, _ := reader.ReadString('\n')
+		if a := strings.TrimSpace(strings.ToLower(answer)); a != "y" && a != "yes" {
+			fmt.Fprintf(os.Stderr, "  Keeping current config.\n")
+			generateConfig = false
+		}
+	}
+	if generateConfig {
 		configContent := review.StarterConfig
 		fmt.Fprintf(os.Stderr, "Generating review config...\n")
 		if generated, err := review.Generate(); err != nil {
@@ -172,14 +198,8 @@ jobs:
 		configCreated = true
 	}
 
-	// 8. Update .gitignore.
-	gitignoreUpdated, err := updateGitignore()
-	if err != nil {
-		return fmt.Errorf("updating .gitignore: %w", err)
-	}
-
-	// 9. Create PR.
-	if !workflowCreated && !configCreated && !gitignoreUpdated {
+	// 8. Create PR.
+	if !workflowCreated && !configCreated {
 		fmt.Fprintf(os.Stderr, "\nSetup is already complete — nothing to do.\n")
 		return nil
 	}
@@ -187,16 +207,12 @@ jobs:
 	var filesToAdd []string
 	var bullets []string
 	if workflowCreated {
-		filesToAdd = append(filesToAdd, ".github/workflows/codecanary-bot.yml")
+		filesToAdd = append(filesToAdd, ".github/workflows/codecanary.yml")
 		bullets = append(bullets, "- Add CodeCanary automated PR review workflow")
 	}
 	if configCreated {
 		filesToAdd = append(filesToAdd, ".codecanary.yml")
 		bullets = append(bullets, "- Add starter `.codecanary.yml` config")
-	}
-	if gitignoreUpdated {
-		filesToAdd = append(filesToAdd, ".gitignore")
-		bullets = append(bullets, "- Update `.gitignore` with codecanary entries")
 	}
 
 	if len(filesToAdd) == 0 {
@@ -223,7 +239,7 @@ jobs:
 		return fmt.Errorf("pushing: %s\n%s", err, string(out))
 	}
 
-	prBody := "## Summary\n" + strings.Join(bullets, "\n") + "\n\nPRs will be automatically reviewed by Claude on open and update."
+	prBody := "## Summary\n" + strings.Join(bullets, "\n") + "\n\nCodeCanary will automatically review PRs on open and update."
 	prOut, err := exec.Command("gh", "pr", "create",
 		"--title", "Add CodeCanary PR review",
 		"--body", prBody,
@@ -297,42 +313,3 @@ func confirm(reader *bufio.Reader) bool {
 	return answer == "" || answer == "y" || answer == "yes"
 }
 
-func updateGitignore() (bool, error) {
-	entries := []string{
-		".codecanary.yml.bak",
-	}
-
-	gitignorePath := ".gitignore"
-	existing := ""
-	if data, err := os.ReadFile(gitignorePath); err == nil {
-		existing = string(data)
-	}
-
-	var toAdd []string
-	for _, entry := range entries {
-		if !strings.Contains(existing, entry) {
-			toAdd = append(toAdd, entry)
-		}
-	}
-
-	if len(toAdd) == 0 {
-		fmt.Fprintf(os.Stderr, "  .gitignore already up to date\n")
-		return false, nil
-	}
-
-	if existing != "" && !strings.HasSuffix(existing, "\n") {
-		existing += "\n"
-	}
-
-	prefix := "\n"
-	if existing == "" {
-		prefix = ""
-	}
-	section := prefix + "# codecanary\n" + strings.Join(toAdd, "\n") + "\n"
-	if err := os.WriteFile(gitignorePath, []byte(existing+section), 0644); err != nil {
-		return false, err
-	}
-
-	fmt.Fprintf(os.Stderr, "  Updated .gitignore\n")
-	return true, nil
-}

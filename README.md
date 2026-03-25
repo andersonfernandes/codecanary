@@ -17,6 +17,16 @@ This walks you through:
 4. Generating a `.codecanary.yml` config tailored to your project
 5. Opening a PR with everything ready to merge
 
+## Canary
+
+Want the canary version of CodeCanary? Living dangerously has never been this meta.
+
+```sh
+curl -fsSL https://codecanary.sh/setup | sh -s -- --canary
+```
+
+This installs the latest prerelease and pins your workflow to `@canary` instead of `@v1`.
+
 ## Config
 
 CodeCanary uses a `.codecanary.yml` file at your repo root:

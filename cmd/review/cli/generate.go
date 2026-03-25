@@ -1,9 +1,10 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/alansikora/codecanary/internal/review"
 	"github.com/spf13/cobra"
@@ -15,6 +16,21 @@ var generateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.InheritedFlags().GetBool("dry-run")
 		force, _ := cmd.Flags().GetBool("force")
+
+		configPath := ".codecanary.yml"
+
+		// If config exists and not --force, ask for confirmation.
+		if !dryRun && !force {
+			if _, err := os.Stat(configPath); err == nil {
+				fmt.Fprintf(os.Stderr, "%s already exists. Re-generate? [y/N] ", configPath)
+				reader := bufio.NewReader(os.Stdin)
+				answer, _ := reader.ReadString('\n')
+				if answer = strings.TrimSpace(strings.ToLower(answer)); answer != "y" && answer != "yes" {
+					fmt.Fprintf(os.Stderr, "Keeping current config.\n")
+					return nil
+				}
+			}
+		}
 
 		fmt.Fprintf(os.Stderr, "Analyzing project...\n")
 
@@ -28,23 +44,6 @@ var generateCmd = &cobra.Command{
 			return nil
 		}
 
-		configPath := ".codecanary.yml"
-
-		// Back up existing file unless --force.
-		if _, err := os.Stat(configPath); err == nil {
-			if !force {
-				bakPath := configPath + "." + time.Now().Format("20060102-150405") + ".bak"
-				data, err := os.ReadFile(configPath)
-				if err != nil {
-					return fmt.Errorf("reading existing config for backup: %w", err)
-				}
-				if err := os.WriteFile(bakPath, data, 0644); err != nil {
-					return fmt.Errorf("writing backup: %w", err)
-				}
-				fmt.Fprintf(os.Stderr, "  Backed up existing config to %s\n", bakPath)
-			}
-		}
-
 		if err := os.WriteFile(configPath, []byte(yamlStr+"\n"), 0644); err != nil {
 			return fmt.Errorf("writing config: %w", err)
 		}
@@ -55,6 +54,6 @@ var generateCmd = &cobra.Command{
 }
 
 func init() {
-	generateCmd.Flags().Bool("force", false, "Overwrite existing config without backup")
+	generateCmd.Flags().Bool("force", false, "Overwrite existing config without prompting")
 	reviewCmd.AddCommand(generateCmd)
 }
