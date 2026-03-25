@@ -1,0 +1,113 @@
+# CodeCanary
+
+AI-powered code review for GitHub pull requests. Catch bugs, security issues, and quality problems before they land in main.
+
+## Quick Setup
+
+```sh
+codecanary init
+```
+
+This walks you through:
+1. Installing the CodeCanary Review GitHub App
+2. Authenticating with Claude
+3. Creating the GitHub Actions workflow
+4. Generating a `.codecanary.yml` config tailored to your project
+
+## CLI
+
+```sh
+# Set up automated reviews on a repo
+codecanary init
+
+# Review a PR locally
+codecanary review 42
+
+# Review and post findings to the PR
+codecanary review 42 --post
+
+# Generate a config from your repo
+codecanary review generate
+```
+
+## Config
+
+CodeCanary uses a `.codecanary.yml` file at your repo root:
+
+```yaml
+version: 1
+
+context: |
+  Go REST API using chi router. Tests use testify.
+  All exported functions must have doc comments.
+
+rules:
+  - id: error-handling
+    description: "Errors must be wrapped with context using fmt.Errorf"
+    severity: warning
+    paths: ["**/*.go"]
+
+  - id: sql-injection
+    description: "Database queries must use parameterized statements"
+    severity: critical
+
+ignore:
+  - "dist/**"
+  - "*.lock"
+  - "vendor/**"
+
+evaluation:
+  code_change:
+    context: |
+      Fixes must use errors.Wrap, not bare returns.
+  reply:
+    context: |
+      Treat WONTFIX as acknowledgment.
+```
+
+### Severity Levels
+
+| Level | Use for |
+|-------|---------|
+| `critical` | Security vulnerabilities, data loss, crashes |
+| `bug` | Logic errors, incorrect behavior |
+| `warning` | Potential issues, performance problems, code smells |
+| `suggestion` | Better patterns, readability improvements |
+| `nitpick` | Minor style, naming, formatting |
+
+## How It Works
+
+### First Review
+
+1. Fetches PR metadata and diff via `gh` CLI
+2. Reads full file contents for context (respecting ignore patterns and size limits)
+3. Builds a review prompt with your rules, context, and anti-hallucination guards
+4. Calls Claude to analyze the changes
+5. Posts findings as inline PR review comments
+
+### Incremental Reviews
+
+On subsequent pushes, CodeCanary is smarter:
+
+1. **Go-driven triage** classifies existing threads — no Claude calls for unchanged code
+2. **Parallel evaluation** re-checks threads where code changed or the author replied (using Claude Haiku)
+3. **New code review** only covers the incremental diff, excluding known issues
+4. **Auto-resolution** marks threads as resolved when the code fix addresses the finding
+
+### Thread Lifecycle
+
+- **Code fix detected** — thread is automatically resolved
+- **Author dismisses** — acknowledged, kept open for re-check on future pushes
+- **Author acknowledges** — noted, kept open
+- **Author rebuts** — evaluated for technical merit, kept open
+- **No changes** — skipped entirely (zero Claude cost)
+
+### Safety
+
+- **Anti-hallucination**: explicit file allowlist, line number validation against diff
+- **Anti-ping-pong**: resolved findings injected as context to prevent re-raising
+- **Prompt injection protection**: repository content escaped before inclusion in prompts
+
+## License
+
+MIT
