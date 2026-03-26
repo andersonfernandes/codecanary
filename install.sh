@@ -37,7 +37,12 @@ if [ -z "$TAG" ]; then
   TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | grep '"tag_name"' \
     | cut -d'"' -f4)"
+  if [ -z "$TAG" ]; then
+    echo "Error: could not determine latest release" >&2; exit 1
+  fi
 fi
+case "$TAG" in *[!a-zA-Z0-9._-]*)
+  echo "Error: unexpected tag format: $TAG" >&2; exit 1;; esac
 
 echo "Fetching release ${TAG}..."
 URL="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" \
