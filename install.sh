@@ -37,6 +37,9 @@ if [ -z "$TAG" ]; then
   TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | grep '"tag_name"' \
     | cut -d'"' -f4)"
+  if [ -z "$TAG" ]; then
+    echo "Error: could not determine latest release" >&2; exit 1
+  fi
 fi
 
 echo "Fetching release ${TAG}..."

@@ -23,6 +23,9 @@ case "$ARCH" in
 esac
 
 TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"v//' | sed 's/".*//')
+if [ -z "$TAG" ]; then
+  echo "Error: could not determine latest release" >&2; exit 1
+fi
 if [ "$CANARY" = true ]; then
   echo "Downloading CodeCanary Setup (canary)..."
 else
