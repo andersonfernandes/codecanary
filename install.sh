@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -eu
 
 REPO="alansikora/codecanary"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"

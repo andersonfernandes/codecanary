@@ -80,7 +80,11 @@ func run() error {
 	// 6. Confirm and set secret.
 	if token != "" {
 		fmt.Fprintf(os.Stderr, "Set %s as a secret on %s? [Y/n] ", secretName, repo)
-		if confirm(reader) {
+		ok, err := confirm(reader)
+		if err != nil {
+			return fmt.Errorf("reading input: %w", err)
+		}
+		if ok {
 			fmt.Fprintf(os.Stderr, "Setting %s secret on %s...\n", secretName, repo)
 			if err := auth.SetGitHubSecret(repo, secretName, token); err != nil {
 				return fmt.Errorf("setting secret: %w", err)
@@ -182,7 +186,10 @@ jobs:
 	generateConfig := true
 	if _, err := os.Stat(configPath); err == nil {
 		fmt.Fprintf(os.Stderr, "  %s already exists. Re-generate? [y/N] ", configPath)
-		answer, _ := reader.ReadString('\n')
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("reading input: %w", err)
+		}
 		if a := strings.TrimSpace(strings.ToLower(answer)); a != "y" && a != "yes" {
 			fmt.Fprintf(os.Stderr, "  Keeping current config.\n")
 			generateConfig = false
@@ -271,7 +278,11 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 		if existing != "" {
 			fmt.Fprintf(os.Stderr, "  %s secret found on %s\n", existing, repo)
 			fmt.Fprintf(os.Stderr, "  Replace it? [y/N] ")
-			if !confirmNo(reader) {
+			ok, err := confirmNo(reader)
+			if err != nil {
+				return "", "", fmt.Errorf("reading input: %w", err)
+			}
+			if !ok {
 				fmt.Fprintf(os.Stderr, "  Keeping existing secret.\n\n")
 				return existing, "", nil
 			}
@@ -284,7 +295,10 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 	fmt.Fprintf(os.Stderr, "  [2] API key\n")
 	fmt.Fprintf(os.Stderr, "Choice [1]: ")
 
-	choice, _ := reader.ReadString('\n')
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		return "", "", fmt.Errorf("reading input: %w", err)
+	}
 	choice = strings.TrimSpace(choice)
 
 	if choice == "2" {
@@ -316,15 +330,21 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 	return "CLAUDE_CODE_OAUTH_TOKEN", token, nil
 }
 
-func confirm(reader *bufio.Reader) bool {
-	answer, _ := reader.ReadString('\n')
+func confirm(reader *bufio.Reader) (bool, error) {
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("reading input: %w", err)
+	}
 	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == "" || answer == "y" || answer == "yes"
+	return answer == "" || answer == "y" || answer == "yes", nil
 }
 
-func confirmNo(reader *bufio.Reader) bool {
-	answer, _ := reader.ReadString('\n')
+func confirmNo(reader *bufio.Reader) (bool, error) {
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("reading input: %w", err)
+	}
 	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == "y" || answer == "yes"
+	return answer == "y" || answer == "yes", nil
 }
 
