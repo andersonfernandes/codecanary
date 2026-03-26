@@ -169,10 +169,39 @@ func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string
 		}
 	}
 
+	// Fix-all prompt in a collapsible section.
+	if len(result.Findings) > 0 {
+		b.WriteString("\n<details>\n<summary>\U0001F527 Fix all with AI</summary>\n\n")
+		b.WriteString("Copy the prompt below and paste it into your AI coding tool:\n\n")
+		b.WriteString("````\n")
+		b.WriteString(buildFixAllPrompt(result.Findings))
+		b.WriteString("````\n\n")
+		b.WriteString("</details>\n")
+	}
+
 	// Embed review data as hidden HTML comment for review data extraction.
 	jsonData, err := json.Marshal(result)
 	if err == nil {
 		fmt.Fprintf(&b, "\n<!-- codecanary:review %s -->\n", string(jsonData))
+	}
+
+	return b.String()
+}
+
+// buildFixAllPrompt constructs a copy-pasteable prompt that addresses all findings.
+func buildFixAllPrompt(findings []Finding) string {
+	var b strings.Builder
+
+	b.WriteString("Fix the following code review findings. For each finding, apply the suggested fix or resolve the described issue.\n")
+
+	for _, f := range findings {
+		b.WriteString("\n---\n\n")
+		fmt.Fprintf(&b, "## File: %s, Line: %d\n", f.File, f.Line)
+		fmt.Fprintf(&b, "**Issue (%s):** %s\n", f.Severity, f.Title)
+		fmt.Fprintf(&b, "%s\n", f.Description)
+		if f.Suggestion != "" {
+			fmt.Fprintf(&b, "Suggested fix: %s\n", f.Suggestion)
+		}
 	}
 
 	return b.String()
