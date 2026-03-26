@@ -333,7 +333,7 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 func confirm(reader *bufio.Reader) (bool, error) {
 	answer, err := reader.ReadString('\n')
 	if err != nil {
-		return false, fmt.Errorf("reading input: %w", err)
+		return false, err
 	}
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	return answer == "" || answer == "y" || answer == "yes", nil
@@ -342,7 +342,7 @@ func confirm(reader *bufio.Reader) (bool, error) {
 func confirmNo(reader *bufio.Reader) (bool, error) {
 	answer, err := reader.ReadString('\n')
 	if err != nil {
-		return false, fmt.Errorf("reading input: %w", err)
+		return false, err
 	}
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	return answer == "y" || answer == "yes", nil
