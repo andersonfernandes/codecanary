@@ -197,7 +197,8 @@ func exchangeCode(code, verifier, redirectURI, state string) (string, error) {
 
 // SetGitHubSecret sets a secret on a GitHub repo using gh CLI.
 func SetGitHubSecret(repo, name, value string) error {
-	cmd := exec.Command("gh", "secret", "set", name, "--repo", repo, "--body", value)
+	cmd := exec.Command("gh", "secret", "set", name, "--repo", repo)
+	cmd.Stdin = strings.NewReader(value)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("setting secret: %w\n%s", err, string(out))
 	}

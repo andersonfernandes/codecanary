@@ -74,8 +74,9 @@ export default {
 
       if (!tokenResponse.ok) {
         const body = await tokenResponse.text();
+        console.error(`GitHub API error (status ${tokenResponse.status}): ${body}`);
         return Response.json(
-          { error: `Failed to create installation token: ${body}` },
+          { error: "Failed to create installation token" },
           { status: 502 }
         );
       }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -611,8 +612,14 @@ func ScopeDiffToFiles(diff string, allowedFiles map[string]bool) string {
 	return strings.Join(result, "\n")
 }
 
+// validSHA matches a full-length lowercase hex Git SHA.
+var validSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
 // GetIncrementalDiff gets the diff since a given SHA.
 func GetIncrementalDiff(baseSHA string) (string, error) {
+	if !validSHA.MatchString(baseSHA) {
+		return "", fmt.Errorf("invalid SHA format: %q", baseSHA)
+	}
 	// Ensure the base SHA is available locally (shallow clones may not have it).
 	exec.Command("git", "fetch", "--depth=1", "origin", baseSHA).Run()
 	out, err := exec.Command("git", "diff", baseSHA+"..HEAD").Output()
