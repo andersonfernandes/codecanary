@@ -64,6 +64,36 @@ type Rule struct {
 	ExcludePaths []string `yaml:"exclude_paths"`
 }
 
+// validSeverities is the set of allowed severity values for rules.
+var validSeverities = map[string]bool{
+	"critical": true, "bug": true, "warning": true, "suggestion": true, "nitpick": true,
+}
+
+// Validate checks that config field values are within expected ranges.
+func (c *ReviewConfig) Validate() error {
+	if c.Version != 0 && c.Version != 1 {
+		return fmt.Errorf("unsupported config version: %d", c.Version)
+	}
+	if c.MaxFileSize < 0 {
+		return fmt.Errorf("max_file_size must be non-negative, got %d", c.MaxFileSize)
+	}
+	if c.MaxTotalSize < 0 {
+		return fmt.Errorf("max_total_size must be non-negative, got %d", c.MaxTotalSize)
+	}
+	if c.TimeoutMins < 0 {
+		return fmt.Errorf("timeout_minutes must be non-negative, got %d", c.TimeoutMins)
+	}
+	if c.MaxBudgetUSD < 0 {
+		return fmt.Errorf("max_budget_usd must be non-negative, got %f", c.MaxBudgetUSD)
+	}
+	for i, r := range c.Rules {
+		if r.Severity != "" && !validSeverities[r.Severity] {
+			return fmt.Errorf("rule %d (%q): invalid severity %q", i, r.ID, r.Severity)
+		}
+	}
+	return nil
+}
+
 // LoadConfig reads and parses a review config YAML file from the given path.
 func LoadConfig(path string) (*ReviewConfig, error) {
 	data, err := os.ReadFile(path)
@@ -74,6 +104,10 @@ func LoadConfig(path string) (*ReviewConfig, error) {
 	var cfg ReviewConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	return &cfg, nil

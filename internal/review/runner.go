@@ -21,9 +21,37 @@ type RunOptions struct {
 	ReplyOnly  bool // evaluate thread replies only, skip new findings
 }
 
-// resolveEnv builds the environment for Claude from environment variables.
+// allowedEnvPrefixes lists environment variable prefixes passed to the Claude subprocess.
+var allowedEnvPrefixes = []string{
+	"ANTHROPIC_",
+	"CLAUDE_",
+	"GITHUB_",
+}
+
+// allowedEnvKeys lists exact environment variable names passed to the Claude subprocess.
+var allowedEnvKeys = map[string]bool{
+	"PATH": true, "HOME": true, "USER": true, "SHELL": true,
+	"LANG": true, "TERM": true, "CI": true, "TMPDIR": true,
+}
+
+// resolveEnv builds a filtered environment for the Claude subprocess,
+// passing only variables needed for normal operation and CI.
 func resolveEnv() []string {
-	return os.Environ()
+	var filtered []string
+	for _, e := range os.Environ() {
+		key, _, _ := strings.Cut(e, "=")
+		if allowedEnvKeys[key] {
+			filtered = append(filtered, e)
+			continue
+		}
+		for _, prefix := range allowedEnvPrefixes {
+			if strings.HasPrefix(key, prefix) {
+				filtered = append(filtered, e)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 // runClaude executes Claude with the given prompt and environment.
