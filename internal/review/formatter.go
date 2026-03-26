@@ -169,6 +169,18 @@ func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string
 		}
 	}
 
+	// Fix-all prompt in a collapsible section.
+	if len(result.Findings) > 0 {
+		b.WriteString("\n<details>\n<summary>\U0001F527 Fix all with AI</summary>\n\n")
+		b.WriteString("Copy the prompt below and paste it into your AI coding tool:\n\n")
+		prompt := buildFixAllPrompt(result.Findings)
+		fence := codeFence(prompt)
+		fmt.Fprintf(&b, "%s\n", fence)
+		b.WriteString(prompt)
+		fmt.Fprintf(&b, "%s\n\n", fence)
+		b.WriteString("</details>\n")
+	}
+
 	// Embed review data as hidden HTML comment for review data extraction.
 	jsonData, err := json.Marshal(result)
 	if err == nil {
@@ -176,6 +188,48 @@ func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string
 	}
 
 	return b.String()
+}
+
+// buildFixAllPrompt constructs a copy-pasteable prompt that addresses all findings.
+func buildFixAllPrompt(findings []Finding) string {
+	var b strings.Builder
+
+	b.WriteString("Fix the following code review findings. For each finding, apply the suggested fix or resolve the described issue.\n")
+
+	for _, f := range findings {
+		b.WriteString("\n---\n\n")
+		fmt.Fprintf(&b, "## File: %s, Line: %d\n", f.File, f.Line)
+		fmt.Fprintf(&b, "**Issue (%s):** %s\n", f.Severity, f.Title)
+		fmt.Fprintf(&b, "%s\n", f.Description)
+		if f.Suggestion != "" {
+			fmt.Fprintf(&b, "Suggested fix: %s\n", f.Suggestion)
+		}
+	}
+
+	return b.String()
+}
+
+// codeFence returns a backtick fence long enough to safely wrap content.
+// It scans for the longest consecutive backtick run and returns one longer,
+// with a minimum of 3.
+func codeFence(content string) string {
+	max := 0
+	cur := 0
+	for _, ch := range content {
+		if ch == '`' {
+			cur++
+			if cur > max {
+				max = cur
+			}
+		} else {
+			cur = 0
+		}
+	}
+	n := max + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
 }
 
 // FormatFindingComment renders a single finding as markdown for an inline PR
