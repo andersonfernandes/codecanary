@@ -354,7 +354,7 @@ func evalContext(cfg *ReviewConfig, evalType string) string {
 }
 
 // EvaluateThreadsParallel runs Claude in parallel for threads that need evaluation.
-func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewConfig, maxConcurrent int, model string) []ThreadResolution {
+func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewConfig, maxConcurrent int, model string, tracker *UsageTracker) []ThreadResolution {
 	results := make([]ThreadResolution, len(triaged))
 
 	sem := make(chan struct{}, maxConcurrent)
@@ -373,12 +373,15 @@ func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewC
 			defer func() { <-sem }()
 
 			prompt := BuildPerThreadPrompt(tt, cfg)
-			output, err := runClaude(prompt, env, model, 0, 0)
+			result, err := runClaude(prompt, env, model, 0, 0)
 			if err != nil {
 				results[idx] = ThreadResolution{Index: tt.Index, Error: err}
 				return
 			}
-			results[idx] = parseThreadResolution(string(output), tt.Index)
+			usage := result.Usage
+			usage.Phase = "triage"
+			tracker.Add(usage)
+			results[idx] = parseThreadResolution(result.Text, tt.Index)
 		}(i, t)
 	}
 

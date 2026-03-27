@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -54,18 +55,24 @@ func resolveEnv() []string {
 	return filtered
 }
 
+// claudeResult holds the text output and usage metadata from a Claude CLI call.
+type claudeResult struct {
+	Text  string
+	Usage CallUsage
+}
+
 // runClaude executes Claude with the given prompt and environment.
 // When model is non-empty, it is passed via --model (e.g. "haiku", "sonnet").
 // When maxBudgetUSD is > 0, it is passed via --max-budget-usd.
 // When timeout is 0, defaults to EffectiveTimeout() (5 minutes).
-func runClaude(prompt string, env []string, model string, maxBudgetUSD float64, timeout time.Duration) ([]byte, error) {
+func runClaude(prompt string, env []string, model string, maxBudgetUSD float64, timeout time.Duration) (*claudeResult, error) {
 	if timeout <= 0 {
 		timeout = (&ReviewConfig{}).EffectiveTimeout()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	args := []string{"--print", "--no-session-persistence"}
+	args := []string{"--print", "--output-format", "json", "--no-session-persistence"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
@@ -86,7 +93,25 @@ func runClaude(prompt string, env []string, model string, maxBudgetUSD float64, 
 		}
 		return nil, fmt.Errorf("running claude: %w", err)
 	}
-	return output, nil
+
+	var resp claudeJSONResponse
+	if err := json.Unmarshal(output, &resp); err != nil {
+		// Fallback: treat entire output as plain text (e.g. older CLI version).
+		return &claudeResult{Text: string(output)}, nil
+	}
+
+	return &claudeResult{
+		Text: resp.Result,
+		Usage: CallUsage{
+			Model:             resp.firstModel(),
+			InputTokens:       resp.Usage.InputTokens,
+			OutputTokens:      resp.Usage.OutputTokens,
+			CacheReadTokens:   resp.Usage.CacheReadInputTokens,
+			CacheCreateTokens: resp.Usage.CacheCreationInputTokens,
+			CostUSD:           resp.CostUSD,
+			DurationMS:        resp.DurationMS,
+		},
+	}, nil
 }
 
 // fixedThread holds the index and resolution reason for a fixed thread.
@@ -235,6 +260,9 @@ func Run(opts RunOptions) error {
 	// Resolve Claude environment once for reuse.
 	env := resolveEnv()
 
+	// Usage tracker accumulates token/cost data across all Claude calls.
+	tracker := &UsageTracker{}
+
 	// Check for previous review threads.
 	threads, _ := FetchReviewThreads(repo, opts.PRNumber)
 	startIndex := len(threads) // continue fix_ref numbering after all existing threads
@@ -301,7 +329,7 @@ func Run(opts RunOptions) error {
 			LogTriage(triaged)
 			needsEval := countNonSkipped(triaged)
 			if needsEval > 0 {
-				resolutions := EvaluateThreadsParallel(triaged, env, cfg, 3, "haiku")
+				resolutions := EvaluateThreadsParallel(triaged, env, cfg, 3, "haiku", tracker)
 				LogResolutions(triaged, resolutions)
 				fixed = toFixedThreads(resolutions)
 
@@ -414,13 +442,16 @@ func Run(opts RunOptions) error {
 	var findings []Finding
 	if !opts.ReplyOnly {
 		// 6. Run Claude.
-		claudeOutput, err := runClaude(prompt, env, "", cfg.MaxBudgetUSD, cfg.EffectiveTimeout())
+		result, err := runClaude(prompt, env, "", cfg.MaxBudgetUSD, cfg.EffectiveTimeout())
 		if err != nil {
 			return err
 		}
+		usage := result.Usage
+		usage.Phase = "review"
+		tracker.Add(usage)
 
 		// 7. Parse findings.
-		findings, err = ParseFindings(string(claudeOutput))
+		findings, err = ParseFindings(result.Text)
 		if err != nil {
 			return fmt.Errorf("parsing findings: %w", err)
 		}
@@ -542,6 +573,13 @@ func Run(opts RunOptions) error {
 				return fmt.Errorf("posting review: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
+		}
+	}
+
+	// Write usage report.
+	if report := tracker.Report(repo, opts.PRNumber); len(report.Calls) > 0 {
+		if err := WriteUsageFile(report); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not write usage report: %v\n", err)
 		}
 	}
 

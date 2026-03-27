@@ -474,12 +474,12 @@ func Generate() (string, error) {
 	prompt := buildGeneratePrompt(info)
 	env := resolveEnv()
 
-	output, err := runClaude(prompt, env, "", 0, 0)
+	result, err := runClaude(prompt, env, "", 0, 0)
 	if err != nil {
 		return "", fmt.Errorf("running Claude: %w", err)
 	}
 
-	yamlStr, err := parseGeneratedConfig(string(output))
+	yamlStr, err := parseGeneratedConfig(result.Text)
 	if err != nil {
 		return "", fmt.Errorf("parsing generated config: %w", err)
 	}
