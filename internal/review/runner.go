@@ -285,7 +285,7 @@ func Run(opts RunOptions) error {
 	var fixed []fixedThread
 	if len(reviewThreads) > 0 && previousSHA != "" {
 		// Incremental review.
-		fmt.Fprintf(os.Stderr, "Re-reviewing PR #%d (%d unresolved threads, base %s)\n", opts.PRNumber, len(reviewThreads), previousSHA[:8])
+		Stderrf(ansiBold, "Re-reviewing PR #%d (%d unresolved threads, base %s)\n", opts.PRNumber, len(reviewThreads), previousSHA[:8])
 		incrementalDiff, diffErr := GetIncrementalDiff(previousSHA)
 		if diffErr != nil {
 			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, will use full PR diff for reevaluation\n")
@@ -430,7 +430,7 @@ func Run(opts RunOptions) error {
 		}
 	} else {
 		// First review — full PR diff.
-		fmt.Fprintf(os.Stderr, "Reviewing PR #%d...\n", opts.PRNumber)
+		Stderrf(ansiBold, "Reviewing PR #%d...\n", opts.PRNumber)
 		prompt = BuildPrompt(pr, cfg, startIndex, projectDocs)
 	}
 
@@ -474,9 +474,9 @@ func Run(opts RunOptions) error {
 	}
 
 	if len(findings) == 0 {
-		fmt.Fprintf(os.Stderr, "No new findings\n")
+		Stderrf(ansiGreen, "No new findings\n")
 	} else {
-		fmt.Fprintf(os.Stderr, "Found %d new findings\n", len(findings))
+		Stderrf(ansiYellow, "Found %d new findings\n", len(findings))
 	}
 
 	// Get current HEAD SHA for tracking.
@@ -495,6 +495,9 @@ func Run(opts RunOptions) error {
 	if outputFormat == "" {
 		outputFormat = "markdown"
 	}
+	if outputFormat == "markdown" && stdoutIsTTY() {
+		outputFormat = "terminal"
+	}
 
 	var formatted string
 	switch outputFormat {
@@ -504,6 +507,8 @@ func Run(opts RunOptions) error {
 			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		formatted = jsonOut
+	case "terminal":
+		formatted = FormatTerminal(result)
 	default:
 		formatted = FormatMarkdown(result)
 	}
@@ -551,13 +556,13 @@ func Run(opts RunOptions) error {
 			if err := PostReview(repo, opts.PRNumber, result, pr.Diff, result.SHA); err != nil {
 				return fmt.Errorf("posting review: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
+			Stderrf(ansiGreen, "Review posted to PR #%d\n", opts.PRNumber)
 		} else if len(reviewThreads) > 0 && allResolved(reviewThreads, fixed) {
 			// Re-review: all resolved — post all-clear.
 			if err := PostAllClearReview(repo, opts.PRNumber, minimizeFailed); err != nil {
 				return fmt.Errorf("posting all-clear review: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
+			Stderrf(ansiGreen, "All clear! No issues remaining.\n")
 		} else if len(reviewThreads) > 0 {
 			// Re-review: some still unresolved, no new findings — nothing to post.
 			codeFixedSet := make(map[int]bool, len(fixed))
@@ -573,7 +578,31 @@ func Run(opts RunOptions) error {
 			if err := PostCleanReview(repo, opts.PRNumber); err != nil {
 				return fmt.Errorf("posting review: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
+			Stderrf(ansiGreen, "Review posted to PR #%d\n", opts.PRNumber)
+		}
+	}
+
+	// Save local state when running locally (auto-detected PR, not in CI).
+	// Skip in reply-only mode to avoid overwriting previous findings with an empty slice.
+	if opts.LocalDetect && !opts.DryRun && !opts.ReplyOnly {
+		branch, branchErr := currentBranch()
+		if branchErr == nil {
+			// Merge with existing findings to avoid losing earlier incremental results.
+			allFindings := findings
+			existingState, loadErr := LoadLocalState(branch)
+			if loadErr != nil {
+				Stderrf(ansiYellow, "Warning: could not load local state for merge: %v\n", loadErr)
+			}
+			if existingState != nil {
+				allFindings = append(existingState.Findings, findings...)
+			}
+			if saveErr := SaveLocalState(branch, &LocalState{
+				SHA:      result.SHA,
+				Branch:   branch,
+				Findings: allFindings,
+			}); saveErr != nil {
+				Stderrf(ansiYellow, "Warning: could not save local state: %v\n", saveErr)
+			}
 		}
 	}
 
@@ -669,12 +698,12 @@ func runLocal(opts RunOptions) error {
 			}
 
 			knownIssues := findingsToKnownIssues(state.Findings)
-			fmt.Fprintf(os.Stderr, "Reviewing incremental changes (%d known issues excluded)...\n", len(knownIssues))
+			Stderrf(ansiBold, "Reviewing incremental changes (%d known issues excluded)...\n", len(knownIssues))
 			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, knownIssues, 0, startIndex, incContents, incFiles, nil, projectDocs)
 		}
 	} else {
 		// First local review — full diff.
-		fmt.Fprintf(os.Stderr, "Reviewing local changes on %s...\n", branch)
+		Stderrf(ansiBold, "Reviewing local changes on %s...\n", branch)
 		prompt = BuildPrompt(pr, cfg, 0, projectDocs)
 	}
 
@@ -716,9 +745,9 @@ func runLocal(opts RunOptions) error {
 	findings = FilterNonActionable(findings)
 
 	if len(findings) == 0 {
-		fmt.Fprintf(os.Stderr, "No new findings\n")
+		Stderrf(ansiGreen, "No new findings\n")
 	} else {
-		fmt.Fprintf(os.Stderr, "Found %d new findings\n", len(findings))
+		Stderrf(ansiYellow, "Found %d new findings\n", len(findings))
 	}
 
 	// Build result.
@@ -738,6 +767,9 @@ func runLocal(opts RunOptions) error {
 	if outputFormat == "" {
 		outputFormat = "markdown"
 	}
+	if outputFormat == "markdown" && stdoutIsTTY() {
+		outputFormat = "terminal"
+	}
 
 	var formatted string
 	switch outputFormat {
@@ -747,6 +779,8 @@ func runLocal(opts RunOptions) error {
 			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		formatted = jsonOut
+	case "terminal":
+		formatted = FormatTerminal(reviewResult)
 	default:
 		formatted = FormatMarkdown(reviewResult)
 	}
