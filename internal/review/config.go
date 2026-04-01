@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// isValidURL checks that a string looks like an HTTP(S) URL.
+func isValidURL(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
 
 type ReviewConfig struct {
 	Version      int               `yaml:"version"`
@@ -18,32 +24,61 @@ type ReviewConfig struct {
 	MaxTotalSize int               `yaml:"max_total_size"` // total file content limit in bytes (default 500KB)
 	MaxBudgetUSD float64           `yaml:"max_budget_usd"`  // per-invocation spending limit in USD (default 0 = unlimited)
 	TimeoutMins  int               `yaml:"timeout_minutes"` // per-invocation timeout in minutes (default 5)
-	ReviewModel  string            `yaml:"review_model"`    // Claude model for main review (default: sonnet)
-	TriageModel  string            `yaml:"triage_model"`    // Claude model for thread re-evaluation (default: haiku)
+	ReviewModel  string            `yaml:"review_model"`    // model for main review (default: sonnet)
+	TriageModel  string            `yaml:"triage_model"`    // model for thread re-evaluation (default: haiku)
+	Provider     string            `yaml:"provider"`        // "anthropic", "openai", "openrouter", or "claude"
+	APIBase      string            `yaml:"api_base"`        // override base URL (openai provider only)
+	APIKeyEnv    string            `yaml:"api_key_env"`     // env var name for API key (default depends on provider)
 	Evaluation   *EvaluationConfig `yaml:"evaluation"`
 }
 
-// validModels is the set of allowed model values.
-var validModels = map[string]bool{
+// validCLIModels is the set of allowed model values for the Claude CLI provider.
+// Accepts both aliases (sonnet) and full model IDs (claude-sonnet-4-6).
+var validCLIModels = map[string]bool{
 	"haiku": true, "sonnet": true, "opus": true,
+	"claude-haiku-4-5-20251001": true,
+	"claude-sonnet-4-6":         true,
+	"claude-sonnet-4-5":         true,
+	"claude-opus-4-6":           true,
+	"claude-opus-4-5":           true,
 }
 
-// EffectiveReviewModel returns the model for main review, defaulting to "sonnet".
-// Falls back to the default if the configured value is not in the allowlist.
+// EffectiveReviewModel returns the configured review model.
+// Each provider has its own default when review_model is not set.
 func (c *ReviewConfig) EffectiveReviewModel() string {
-	if c != nil && validModels[c.ReviewModel] {
+	if c != nil && c.ReviewModel != "" {
 		return c.ReviewModel
 	}
-	return "sonnet"
+	if c != nil {
+		switch c.Provider {
+		case "claude":
+			return "claude-sonnet-4-6"
+		case "openrouter":
+			return "anthropic/claude-sonnet-4-6"
+		case "openai":
+			return "gpt-5.4"
+		}
+	}
+	return "claude-sonnet-4-6" // anthropic
 }
 
-// EffectiveTriageModel returns the model for thread re-evaluation, defaulting to "haiku".
-// Falls back to the default if the configured value is not in the allowlist.
+// EffectiveTriageModel returns the configured triage model.
+// Each provider has its own default when triage_model is not set.
 func (c *ReviewConfig) EffectiveTriageModel() string {
-	if c != nil && validModels[c.TriageModel] {
+	if c != nil && c.TriageModel != "" {
 		return c.TriageModel
 	}
-	return "haiku"
+	if c != nil {
+		switch c.Provider {
+		case "claude":
+			return "claude-haiku-4-5-20251001"
+		case "openrouter":
+			return "anthropic/claude-haiku-4-5-20251001"
+		case "openai":
+			return "gpt-5.4-mini"
+		}
+	}
+	return "claude-haiku-4-5-20251001" // anthropic
 }
 
 // EvaluationConfig holds per-evaluation-type settings for re-evaluation prompts.
@@ -111,11 +146,29 @@ func (c *ReviewConfig) Validate() error {
 	if c.MaxBudgetUSD < 0 {
 		return fmt.Errorf("max_budget_usd must be non-negative, got %f", c.MaxBudgetUSD)
 	}
-	if c.ReviewModel != "" && !validModels[c.ReviewModel] {
-		return fmt.Errorf("invalid review_model %q (valid: haiku, sonnet, opus)", c.ReviewModel)
-	}
-	if c.TriageModel != "" && !validModels[c.TriageModel] {
-		return fmt.Errorf("invalid triage_model %q (valid: haiku, sonnet, opus)", c.TriageModel)
+	switch c.Provider {
+	case "anthropic", "openrouter":
+		// Accept any model string.
+		if c.APIBase != "" {
+			return fmt.Errorf("api_base is not supported by the %s provider", c.Provider)
+		}
+	case "openai":
+		// Accept any model string; api_base can override the endpoint.
+		if c.APIBase != "" && !isValidURL(c.APIBase) {
+			return fmt.Errorf("invalid api_base %q: must be an HTTP(S) URL", c.APIBase)
+		}
+	case "claude":
+		// Claude CLI only accepts known shorthand model names.
+		if c.ReviewModel != "" && !validCLIModels[c.ReviewModel] {
+			return fmt.Errorf("invalid review_model %q for claude provider (valid: haiku, sonnet, opus)", c.ReviewModel)
+		}
+		if c.TriageModel != "" && !validCLIModels[c.TriageModel] {
+			return fmt.Errorf("invalid triage_model %q for claude provider (valid: haiku, sonnet, opus)", c.TriageModel)
+		}
+	case "":
+		return fmt.Errorf("provider is required (valid: anthropic, openai, openrouter, claude)")
+	default:
+		return fmt.Errorf("invalid provider %q (valid: anthropic, openai, openrouter, claude)", c.Provider)
 	}
 	for i, r := range c.Rules {
 		if r.Severity != "" && !validSeverities[r.Severity] {

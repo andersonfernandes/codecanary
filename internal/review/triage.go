@@ -1,6 +1,7 @@
 package review
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -392,8 +393,8 @@ func evalContext(cfg *ReviewConfig, evalType string) string {
 	return ""
 }
 
-// EvaluateThreadsParallel runs Claude in parallel for threads that need evaluation.
-func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewConfig, maxConcurrent int, model string, tracker *UsageTracker) []ThreadResolution {
+// EvaluateThreadsParallel runs the LLM in parallel for threads that need evaluation.
+func EvaluateThreadsParallel(triaged []TriagedThread, provider ModelProvider, cfg *ReviewConfig, maxConcurrent int, model string, tracker *UsageTracker) []ThreadResolution {
 	results := make([]ThreadResolution, len(triaged))
 
 	sem := make(chan struct{}, maxConcurrent)
@@ -411,7 +412,7 @@ func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewC
 			defer func() { <-sem }()
 
 			prompt := BuildPerThreadPrompt(tt, cfg)
-			result, err := runClaude(prompt, env, model, 0, 0)
+			result, err := provider.Run(context.Background(), prompt, RunOpts{Model: model})
 			if err != nil {
 				results[idx] = ThreadResolution{Index: tt.Index, Error: err}
 				return

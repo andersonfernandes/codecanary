@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -15,6 +16,8 @@ import (
 )
 
 var version = "dev"
+
+var secretNameRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 func main() {
 	if err := run(); err != nil {
@@ -113,11 +116,20 @@ func run() error {
 		actionRef = "canary"
 	}
 
-	var authEnv string
-	if secretName == "ANTHROPIC_API_KEY" {
-		authEnv = "          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}"
-	} else {
-		authEnv = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+	// Build the action step's with: inputs and optional step-level env: block.
+	// Known providers use action inputs (with:); custom providers use step env:.
+	var withAuth, stepEnv string
+	switch secretName {
+	case "ANTHROPIC_API_KEY":
+		withAuth = "          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}"
+	case "CLAUDE_CODE_OAUTH_TOKEN":
+		withAuth = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+	default:
+		// Custom provider (openai, openrouter, etc.) — pass the key as a
+		// step-level env var so the action forwards it to the subprocess.
+		stepEnv = fmt.Sprintf("\n        env:\n          %s: ${{ secrets.%s }}", secretName, secretName)
+		fmt.Fprintf(os.Stderr, "\nNote: using custom provider key %s.\n", secretName)
+		fmt.Fprintf(os.Stderr, "Add it as a repository secret: Settings → Secrets → Actions → New secret\n")
 	}
 
 	workflow := fmt.Sprintf(`name: CodeCanary
@@ -173,14 +185,14 @@ jobs:
         with:
 %s
           config_path: .codecanary/config.yml
-          reply_only: ${{ github.event_name == 'pull_request_review_comment' }}
+          reply_only: ${{ github.event_name == 'pull_request_review_comment' }}%s
 
       - name: Usage
         if: always() && env.skip != 'true' && env.CODECANARY_USAGE != ''
         env:
           USAGE_DATA: ${{ env.CODECANARY_USAGE }}
         run: codecanary review costs --data "$USAGE_DATA"
-`, actionRef, authEnv)
+`, actionRef, withAuth, stepEnv)
 
 	if err := os.MkdirAll(workflowDir, 0755); err != nil {
 		return fmt.Errorf("creating workflow directory: %w", err)
@@ -214,18 +226,10 @@ jobs:
 		}
 	}
 	if generateConfig {
-		configContent := review.StarterConfig
-		fmt.Fprintf(os.Stderr, "Generating review config...\n")
-		if generated, err := review.Generate(); err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: could not generate config with Claude: %v\n", err)
-			fmt.Fprintf(os.Stderr, "  Using starter template instead\n")
-		} else {
-			configContent = generated + "\n"
-		}
 		if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 			return fmt.Errorf("creating .codecanary directory: %w", err)
 		}
-		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		if err := os.WriteFile(configPath, []byte(review.StarterConfig), 0644); err != nil {
 			return fmt.Errorf("writing review config: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
@@ -312,9 +316,10 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "How would you like to authenticate Claude?\n")
-	fmt.Fprintf(os.Stderr, "  [1] OAuth (default)\n")
-	fmt.Fprintf(os.Stderr, "  [2] API key\n")
+	fmt.Fprintf(os.Stderr, "How would you like to authenticate?\n")
+	fmt.Fprintf(os.Stderr, "  [1] Claude OAuth (default)\n")
+	fmt.Fprintf(os.Stderr, "  [2] Anthropic API key\n")
+	fmt.Fprintf(os.Stderr, "  [3] Other API key (OpenAI, OpenRouter, etc.)\n")
 	fmt.Fprintf(os.Stderr, "Choice [1]: ")
 
 	choice, err := reader.ReadString('\n')
@@ -323,8 +328,9 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 	}
 	choice = strings.TrimSpace(choice)
 
-	if choice == "2" {
-		// API key flow.
+	switch choice {
+	case "2":
+		// Anthropic API key flow.
 		fmt.Fprintf(os.Stderr, "\nPaste your Anthropic API key: ")
 		keyBytes, err := term.ReadPassword(int(syscall.Stdin))
 		fmt.Fprintf(os.Stderr, "\n")
@@ -337,19 +343,44 @@ func authenticateClaude(repo string, reader *bufio.Reader) (string, string, erro
 		}
 		fmt.Fprintf(os.Stderr, "\n")
 		return "ANTHROPIC_API_KEY", key, nil
-	}
 
-	// OAuth flow (default).
-	if err := auth.InstallGitHubApp(repo, reader); err != nil {
-		return "", "", fmt.Errorf("installing Claude GitHub App: %w", err)
-	}
+	case "3":
+		// Custom provider API key flow.
+		fmt.Fprintf(os.Stderr, "\nSecret name (e.g. OPENAI_API_KEY, OPENROUTER_API_KEY): ")
+		name, err := reader.ReadString('\n')
+		if err != nil {
+			return "", "", fmt.Errorf("reading input: %w", err)
+		}
+		name = strings.TrimSpace(name)
+		if !secretNameRe.MatchString(name) {
+			return "", "", fmt.Errorf("invalid secret name %q — must be uppercase letters, digits, and underscores (e.g. OPENAI_API_KEY)", name)
+		}
+		fmt.Fprintf(os.Stderr, "Paste your API key: ")
+		keyBytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Fprintf(os.Stderr, "\n")
+		if err != nil {
+			return "", "", fmt.Errorf("reading API key: %w", err)
+		}
+		key := strings.TrimSpace(string(keyBytes))
+		if key == "" {
+			return "", "", fmt.Errorf("API key cannot be empty")
+		}
+		fmt.Fprintf(os.Stderr, "\n")
+		return name, key, nil
 
-	token, err := auth.OAuthToken()
-	if err != nil {
-		return "", "", fmt.Errorf("OAuth authentication failed: %w", err)
-	}
+	default:
+		// OAuth flow (default).
+		if err := auth.InstallGitHubApp(repo, reader); err != nil {
+			return "", "", fmt.Errorf("installing Claude GitHub App: %w", err)
+		}
 
-	return "CLAUDE_CODE_OAUTH_TOKEN", token, nil
+		token, err := auth.OAuthToken()
+		if err != nil {
+			return "", "", fmt.Errorf("OAuth authentication failed: %w", err)
+		}
+
+		return "CLAUDE_CODE_OAUTH_TOKEN", token, nil
+	}
 }
 
 func confirm(reader *bufio.Reader) (bool, error) {

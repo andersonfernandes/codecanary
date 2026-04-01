@@ -433,36 +433,27 @@ func parseGeneratedConfig(output string) (string, error) {
 	return strings.TrimSpace(raw), nil
 }
 
-// Generate analyzes the repo and uses Claude to produce a review config.
-// Returns the YAML string. Does not write to disk.
-func Generate() (string, error) {
-	info, err := GatherRepoInfo()
-	if err != nil {
-		return "", fmt.Errorf("gathering repo info: %w", err)
-	}
-
-	prompt := buildGeneratePrompt(info)
-	env := resolveEnv()
-
-	result, err := runClaude(prompt, env, "", 0, 0)
-	if err != nil {
-		return "", fmt.Errorf("running Claude: %w", err)
-	}
-
-	yamlStr, err := parseGeneratedConfig(result.Text)
-	if err != nil {
-		return "", fmt.Errorf("parsing generated config: %w", err)
-	}
-
-	return yamlStr, nil
-}
-
-// StarterConfig is the static fallback template used when Claude is unavailable.
+// StarterConfig is the static template used when creating a new config.
 const StarterConfig = `version: 1
 
-# Add review rules for your project.
-# See https://github.com/alansikora/codecanary for documentation.
+# Required — uncomment one provider block:
 #
+# provider: anthropic
+# review_model: claude-sonnet-4-6
+# triage_model: claude-haiku-4-5-20251001
+#
+# provider: openai
+# review_model: gpt-5.4
+# triage_model: gpt-5.4-mini
+#
+# provider: openrouter
+# review_model: anthropic/claude-sonnet-4-6
+# triage_model: anthropic/claude-haiku-4-5-20251001
+#
+# provider: claude
+# review_model: claude-sonnet-4-6
+# triage_model: claude-haiku-4-5-20251001
+
 # rules:
 #   - id: example-rule
 #     description: "Describe what to check for"
