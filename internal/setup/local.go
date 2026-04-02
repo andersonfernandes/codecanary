@@ -49,15 +49,20 @@ func RunLocal() error {
 		}
 	}
 
-	// 3. Select model.
+	// 3. Select models.
 	reviewModel, err := SelectModel(provider)
+	if err != nil {
+		return err
+	}
+
+	triageModel, err := SelectTriageModel(provider)
 	if err != nil {
 		return err
 	}
 
 	// 4. Generate or write config.
 	configPath := filepath.Join(".codecanary", "config.yml")
-	if err := writeConfig(provider, reviewModel, configPath); err != nil {
+	if err := writeConfig(provider, reviewModel, triageModel, configPath); err != nil {
 		return err
 	}
 
@@ -65,9 +70,13 @@ func RunLocal() error {
 	return nil
 }
 
-func writeConfig(provider, reviewModel, configPath string) error {
+func writeConfig(provider, reviewModel, triageModel, configPath string) error {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	if triageModel == "" {
+		return fmt.Errorf("triage_model is required")
 	}
 
 	// Build a minimal working config.
@@ -75,6 +84,7 @@ func writeConfig(provider, reviewModel, configPath string) error {
 	if reviewModel != "" {
 		config += fmt.Sprintf("review_model: %s\n", reviewModel)
 	}
+	config += fmt.Sprintf("triage_model: %s\n", triageModel)
 	config += "\n" + review.StarterRulesSection
 
 	return writeFileWithConfirm(configPath, []byte(config))

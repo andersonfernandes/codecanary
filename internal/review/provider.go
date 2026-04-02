@@ -40,8 +40,8 @@ type ProviderFactory struct {
 	New                func(cfg *ReviewConfig, env []string) ModelProvider
 	Validate           func(cfg *ReviewConfig) error
 	Pricing            []PricingEntry
-	DefaultReviewModel string
-	DefaultTriageModel string
+	SuggestedReviewModel string
+	SuggestedTriageModel string
 }
 
 // providers maps provider names to their factories.
@@ -72,6 +72,16 @@ func NewProvider(cfg *ReviewConfig, env []string) ModelProvider {
 		panic(fmt.Sprintf("provider %q registered without a New constructor", cfg.Provider))
 	}
 	return pf.New(cfg, env)
+}
+
+// GetSuggestedTriageModel returns the suggested triage model for a provider.
+// Used by the setup wizard to pre-select the recommended option.
+func GetSuggestedTriageModel(provider string) string {
+	pf, ok := providers[provider]
+	if !ok {
+		return ""
+	}
+	return pf.SuggestedTriageModel
 }
 
 // lookupEnvVar finds a variable by name in the filtered environment.
