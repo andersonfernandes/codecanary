@@ -13,8 +13,6 @@ cmd/
       review.go    # codecanary review <pr>
       setup.go     # codecanary setup [local|github]
       auth.go      # codecanary auth [status|delete]
-  setup/           # Legacy setup binary (deprecated, kept for transition)
-    main.go        # Interactive setup wizard (single file, no framework)
 internal/
   review/
     runner.go            # Core review pipeline — single Run() entry point
@@ -42,9 +40,8 @@ internal/
     state.go             # Local state persistence
     generate.go          # Config generation from repo analysis
     docs.go              # Project doc discovery
-  credentials/     # OS keychain integration (macOS Keychain, Linux Secret Service)
-    keyring.go     # Store/Retrieve/Delete via go-keyring
-    resolve.go     # API key resolution: env var → keychain → error
+  credentials/     # Credential storage (keychain with file fallback)
+    keyring.go     # Store/Retrieve/Delete — keychain first, ~/.codecanary/credentials.json fallback
   setup/           # Setup wizard logic (huh forms)
     forms.go       # Shared huh form components
     validate.go    # API key validation via test calls
@@ -60,13 +57,11 @@ install.sh         # Downloads and installs codecanary binary permanently
 ## Binary
 
 - **`codecanary`** — single binary for reviews, setup, and credential management. Installed locally via `install.sh`, also used by the GitHub Action.
-- **`codecanary-setup`** — legacy setup binary (deprecated, will be removed).
 
 ## Build
 
 ```sh
 go build ./cmd/review    # builds codecanary
-go build ./cmd/setup     # builds codecanary-setup
 ```
 
 Version is set via ldflags: `-X main.version=v{version}`
@@ -75,7 +70,7 @@ Version is set via ldflags: `-X main.version=v{version}`
 
 - `spf13/cobra` — CLI framework
 - `charmbracelet/huh` — terminal form builder (setup wizard)
-- `zalando/go-keyring` — OS keychain (macOS Keychain, Linux Secret Service)
+- `zalando/go-keyring` — OS keychain (with file-based fallback for systems without one)
 - `bmatcuk/doublestar` — glob pattern matching for ignore rules
 - `gopkg.in/yaml.v3` — config parsing
 - `golang.org/x/term` — terminal detection
@@ -93,7 +88,7 @@ Abstracts LLM invocations. The core engine calls `provider.Run(ctx, prompt, opts
 **Implementations**: `anthropic`, `openai`, `openrouter`, `claude` (CLI).
 **Selection**: factory registry in `provider.go` — `NewProvider(cfg, env)` returns the right implementation based on `cfg.Provider`.
 
-Adding a new LLM provider means: create `provider_<name>.go` and register a `ProviderFactory` (constructor, validation, pricing, default models) via `init()`. Single-file change — no modifications to `config.go` or `pricing.go`.
+Adding a new LLM provider means: create `provider_<name>.go` and register a `ProviderFactory` (constructor, validation, pricing, default models) via `init()`.
 
 ### Platform layer — `ReviewPlatform` interface (`platform.go`)
 
@@ -124,7 +119,7 @@ There is a **single `Run()` function** — not separate paths for GitHub vs. loc
 - **Anti-hallucination**: explicit file allowlist, line validation against diff, max finding distance threshold
 - **Worker** (`worker/`): OIDC token exchange proxy at `oidc.codecanary.sh` — verifies GitHub Actions OIDC token, returns GitHub App installation token
 - **Setup** is a subcommand (`codecanary setup`) using `charmbracelet/huh` forms, with `local` and `github` sub-flows
-- **Credentials** are stored in the OS keychain via `go-keyring`. `resolveEnv()` in `runner.go` injects keychain credentials into the filtered env when not already set. Env vars always take priority.
+- **Credentials** are stored via `go-keyring` (OS keychain) with a file-based fallback (`~/.codecanary/credentials.json`, mode `0600`). `resolveEnv()` in `runner.go` injects stored credentials into the filtered env when not already set. Env vars always take priority.
 
 ## Rules
 
