@@ -1,6 +1,8 @@
 package setup
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/alansikora/codecanary/internal/review"
 	"github.com/charmbracelet/huh"
+	"gopkg.in/yaml.v3"
 )
 
 // SelectSetupMode prompts the user to choose between local and GitHub setup.
@@ -152,6 +155,14 @@ func writeReviewPolicy(configPath string) (bool, error) {
 	}
 	policyPath := filepath.Join(dir, "review.yml")
 
+	// Non-destructive: if the file already exists, leave it alone.
+	if _, err := os.Stat(policyPath); err == nil {
+		fmt.Fprintf(os.Stderr, "Keeping existing %s\n", policyPath)
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("checking %s: %w", policyPath, err)
+	}
+
 	content := `# Review rules — custom checks CodeCanary enforces on every PR.
 # Each rule needs an id, description, and severity.
 # Severity: critical | bug | warning | suggestion | nitpick
@@ -180,7 +191,11 @@ func writeReviewPolicy(configPath string) (bool, error) {
 #   - "*.min.js"
 `
 
-	return writeFileWithConfirm(policyPath, []byte(content))
+	if err := os.WriteFile(policyPath, []byte(content), 0644); err != nil {
+		return false, fmt.Errorf("writing %s: %w", policyPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "Created %s\n", policyPath)
+	return true, nil
 }
 
 func writeConfig(provider, reviewModel, triageModel, configPath string) (bool, error) {
@@ -198,11 +213,118 @@ func writeConfig(provider, reviewModel, triageModel, configPath string) (bool, e
 		return false, fmt.Errorf("triage_model is required")
 	}
 
-	config := fmt.Sprintf("version: 1\n\nprovider: %s\n", provider)
-	config += fmt.Sprintf("review_model: %s\n", reviewModel)
-	config += fmt.Sprintf("triage_model: %s\n", triageModel)
+	// Read existing file into a yaml.Node tree to preserve comments and
+	// user-added fields. If the file doesn't exist, start from scratch.
+	existing, err := os.ReadFile(configPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("reading %s: %w", configPath, err)
+		}
+		// File doesn't exist — fall through to fresh write.
+	}
 
-	return writeFileWithConfirm(configPath, []byte(config))
+	if len(bytes.TrimSpace(existing)) == 0 {
+		// No existing file (or empty) — write fresh.
+		config := fmt.Sprintf("version: 1\n\nprovider: %s\n", provider)
+		config += fmt.Sprintf("review_model: %s\n", reviewModel)
+		config += fmt.Sprintf("triage_model: %s\n", triageModel)
+
+		if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
+			return false, fmt.Errorf("writing %s: %w", configPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "Created %s\n", configPath)
+		return true, nil
+	}
+
+	// Parse into node tree so we can surgically update keys.
+	var doc yaml.Node
+	if err := yaml.Unmarshal(existing, &doc); err != nil {
+		return false, fmt.Errorf("parsing existing %s: %w", configPath, err)
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return false, fmt.Errorf("%s is not a valid YAML mapping", configPath)
+	}
+
+	mapping := doc.Content[0]
+	updates := []struct{ key, value string }{
+		{"version", "1"},
+		{"provider", provider},
+		{"review_model", reviewModel},
+		{"triage_model", triageModel},
+	}
+
+	// Collect changes, log what's different, skip write if nothing changed.
+	var diffs []string
+	for _, u := range updates {
+		old := getYAMLScalar(mapping, u.key)
+		if old == u.value {
+			continue
+		}
+		if old == "" {
+			diffs = append(diffs, fmt.Sprintf("  %s: %s (new)", u.key, u.value))
+		} else {
+			diffs = append(diffs, fmt.Sprintf("  %s: %s → %s", u.key, old, u.value))
+		}
+	}
+
+	if len(diffs) == 0 {
+		fmt.Fprintf(os.Stderr, "%s is up to date\n", configPath)
+		return false, nil
+	}
+
+	for _, u := range updates {
+		tag := "!!str"
+		if u.key == "version" {
+			tag = "!!int"
+		}
+		setYAMLScalar(mapping, u.key, u.value, yaml.ScalarNode, tag)
+	}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return false, fmt.Errorf("marshaling config: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return false, fmt.Errorf("closing encoder: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, buf.Bytes(), 0644); err != nil {
+		return false, fmt.Errorf("writing %s: %w", configPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "Updated %s:\n", configPath)
+	for _, d := range diffs {
+		fmt.Fprintln(os.Stderr, d)
+	}
+	return true, nil
+}
+
+// getYAMLScalar returns the string value of a scalar key in a YAML mapping
+// node, or "" if the key is not found.
+func getYAMLScalar(mapping *yaml.Node, key string) string {
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1].Value
+		}
+	}
+	return ""
+}
+
+// setYAMLScalar sets a scalar key in a YAML mapping node, updating the value
+// in place if the key exists, or appending a new key-value pair if it doesn't.
+// When updating an existing node, only the value is changed — the original tag
+// and style are preserved. The tag parameter is only used for new entries.
+func setYAMLScalar(mapping *yaml.Node, key, value string, kind yaml.Kind, tag string) {
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content[i+1].Value = value
+			return
+		}
+	}
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
+	valNode := &yaml.Node{Kind: kind, Value: value, Tag: tag}
+	mapping.Content = append(mapping.Content, keyNode, valNode)
 }
 
 func triageModelOptions(provider string) []huh.Option[string] {
