@@ -53,14 +53,13 @@ func InputAPIKey(provider string) (string, error) {
 	}
 
 	guidance := ProviderGuidance(provider)
-	envVar := ProviderEnvVar(provider)
 
 	var apiKey string
 	err := huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().
 				Title(fmt.Sprintf("%s API Key", strings.ToTitle(provider[:1])+provider[1:])).
-				Description(fmt.Sprintf("%s\nEnvironment variable: %s", guidance, envVar)),
+				Description(fmt.Sprintf("%s\nEnvironment variable: %s", guidance, ProviderEnvVar())),
 			huh.NewInput().
 				Title("API Key").
 				EchoMode(huh.EchoModePassword).
@@ -76,14 +75,15 @@ func InputAPIKey(provider string) (string, error) {
 	return strings.TrimSpace(apiKey), err
 }
 
-// SelectModel prompts the user to choose a review model or accept defaults.
+// SelectModel prompts the user to choose a review model.
+// The provider's suggested review model is pre-selected.
 func SelectModel(provider string) (string, error) {
 	options := modelOptions(provider)
 	if len(options) == 0 {
 		return "", nil
 	}
 
-	var reviewModel string
+	reviewModel := review.GetSuggestedReviewModel(provider)
 	err := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
@@ -149,15 +149,18 @@ func writeConfig(provider, reviewModel, triageModel, configPath string) error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
+	if provider == "" {
+		return fmt.Errorf("provider is required")
+	}
+	if reviewModel == "" {
+		return fmt.Errorf("review_model is required")
+	}
 	if triageModel == "" {
 		return fmt.Errorf("triage_model is required")
 	}
 
-	// Build a minimal working config.
 	config := fmt.Sprintf("version: 1\nprovider: %s\n", provider)
-	if reviewModel != "" {
-		config += fmt.Sprintf("review_model: %s\n", reviewModel)
-	}
+	config += fmt.Sprintf("review_model: %s\n", reviewModel)
 	config += fmt.Sprintf("triage_model: %s\n", triageModel)
 
 	return writeFileWithConfirm(configPath, []byte(config))
@@ -167,25 +170,25 @@ func triageModelOptions(provider string) []huh.Option[string] {
 	switch provider {
 	case "anthropic":
 		return []huh.Option[string]{
-			huh.NewOption("claude-haiku-4-5-20251001 (recommended)", "claude-haiku-4-5-20251001"),
+			huh.NewOption("claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"),
 			huh.NewOption("claude-sonnet-4-6", "claude-sonnet-4-6"),
 			huh.NewOption("claude-opus-4-6", "claude-opus-4-6"),
 		}
 	case "openai":
 		return []huh.Option[string]{
-			huh.NewOption("gpt-5.4-mini (recommended)", "gpt-5.4-mini"),
+			huh.NewOption("gpt-5.4-mini", "gpt-5.4-mini"),
 			huh.NewOption("gpt-5.4", "gpt-5.4"),
 		}
 	case "openrouter":
 		return []huh.Option[string]{
-			huh.NewOption("anthropic/claude-haiku-4-5-20251001 (recommended)", "anthropic/claude-haiku-4-5-20251001"),
+			huh.NewOption("anthropic/claude-haiku-4-5-20251001", "anthropic/claude-haiku-4-5-20251001"),
 			huh.NewOption("anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"),
 			huh.NewOption("openai/gpt-5.4-mini", "openai/gpt-5.4-mini"),
 			huh.NewOption("openai/gpt-5.4", "openai/gpt-5.4"),
 		}
 	case "claude":
 		return []huh.Option[string]{
-			huh.NewOption("haiku (recommended)", "haiku"),
+			huh.NewOption("haiku", "haiku"),
 			huh.NewOption("sonnet", "sonnet"),
 			huh.NewOption("opus", "opus"),
 		}
@@ -198,24 +201,24 @@ func modelOptions(provider string) []huh.Option[string] {
 	switch provider {
 	case "anthropic":
 		return []huh.Option[string]{
-			huh.NewOption("claude-sonnet-4-6 (default)", ""),
+			huh.NewOption("claude-sonnet-4-6", "claude-sonnet-4-6"),
 			huh.NewOption("claude-opus-4-6", "claude-opus-4-6"),
 			huh.NewOption("claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"),
 		}
 	case "openai":
 		return []huh.Option[string]{
-			huh.NewOption("gpt-5.4 (default)", ""),
+			huh.NewOption("gpt-5.4", "gpt-5.4"),
 			huh.NewOption("gpt-5.4-mini", "gpt-5.4-mini"),
 		}
 	case "openrouter":
 		return []huh.Option[string]{
-			huh.NewOption("anthropic/claude-sonnet-4-6 (default)", ""),
+			huh.NewOption("anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"),
 			huh.NewOption("anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6"),
 			huh.NewOption("openai/gpt-5.4", "openai/gpt-5.4"),
 		}
 	case "claude":
 		return []huh.Option[string]{
-			huh.NewOption("sonnet (default)", ""),
+			huh.NewOption("sonnet", "sonnet"),
 			huh.NewOption("opus", "opus"),
 			huh.NewOption("haiku", "haiku"),
 		}

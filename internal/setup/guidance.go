@@ -20,10 +20,9 @@ func ProviderGuidance(provider string) string {
 	}
 }
 
-// ProviderEnvVar returns the default env var name for a provider's API key.
-// Delegates to the credentials package (single source of truth).
-func ProviderEnvVar(provider string) string {
-	return credentials.DefaultEnvVar(provider)
+// ProviderEnvVar returns the environment variable name used for provider credentials.
+func ProviderEnvVar() string {
+	return credentials.EnvVar
 }
 
 // GitHubPermissionsGuidance returns an explanation of the GitHub Actions permissions.
@@ -34,14 +33,7 @@ func GitHubPermissionsGuidance() string {
   id-token: write        — OIDC token for secure authentication`
 }
 
-// ProviderSecretName returns the GitHub secret name for a provider.
-// For API-key providers this is the same as the env var; for Claude it's the OAuth token.
-func ProviderSecretName(provider string) string {
-	if provider == "claude" {
-		return "CLAUDE_CODE_OAUTH_TOKEN"
-	}
-	if envVar := credentials.DefaultEnvVar(provider); envVar != "" {
-		return envVar
-	}
-	return provider + "_API_KEY"
+// ProviderSecretName returns the GitHub secret name for the provider API key.
+func ProviderSecretName() string {
+	return credentials.EnvVar
 }

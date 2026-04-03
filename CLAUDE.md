@@ -85,7 +85,7 @@ The review engine (`runner.go`) is provider- and platform-agnostic. It depends o
 Abstracts LLM invocations. The core engine calls `provider.Run(ctx, prompt, opts)` and gets back text + usage metadata. It never knows which LLM backend is being used.
 
 **Implementations**: `anthropic`, `openai`, `openrouter`, `claude` (CLI).
-**Selection**: factory registry in `provider.go` — `NewProvider(cfg, env)` returns the right implementation based on `cfg.Provider`.
+**Selection**: factory registry in `provider.go` — `NewProviderForRole(mc, env)` returns the right implementation based on `mc.Provider`.
 
 Adding a new LLM provider means: create `provider_<name>.go` and register a `ProviderFactory` (constructor, validation, pricing, default models) via `init()`.
 
@@ -103,7 +103,7 @@ There is a **single `Run()` function** — not separate paths for GitHub vs. loc
 
 1. Fetch PR data (or local diff)
 2. Load config, project docs, file contents
-3. Create provider via `NewProvider()` (factory, provider-agnostic)
+3. Create providers via `NewProviderForRole()` (factory, provider-agnostic)
 4. Load previous findings via `platform.LoadPreviousFindings()`
 5. If incremental: triage threads, evaluate via provider, handle resolutions
 6. Build and execute main review prompt
@@ -112,13 +112,13 @@ There is a **single `Run()` function** — not separate paths for GitHub vs. loc
 
 ### Other architecture notes
 
-- **Config** is `.codecanary/config.yml` (directory structure). Legacy `.codecanary.yml` at repo root is still supported with a deprecation warning.
+- **Config** is split across two files in `.codecanary/`: `config.yml` (provider, models, budgets, timeouts) and `review.yml` (rules, context, ignore patterns). `review.yml` is optional — if present, its fields override rules/context/ignore in `config.yml`. Legacy `.codecanary.yml` at repo root is still supported with a deprecation warning.
 - **Incremental reviews**: on re-push, triage existing threads (Go-driven classifier in `triage.go`), evaluate changed threads via provider (triage model), then review only new code
 - **Dual marker detection**: reads both `codecanary:review` and legacy `clanopy:review` HTML markers for backward compatibility
 - **Anti-hallucination**: explicit file allowlist, line validation against diff, max finding distance threshold
 - **Worker** (`worker/`): OIDC token exchange proxy at `oidc.codecanary.sh` — verifies GitHub Actions OIDC token, returns GitHub App installation token
 - **Setup** is a subcommand (`codecanary setup`) using `charmbracelet/huh` forms, with `local` and `github` sub-flows
-- **Credentials** are stored via `go-keyring` (OS keychain) with a file-based fallback (`~/.codecanary/credentials.json`, mode `0600`). `resolveEnv()` in `runner.go` injects stored credentials into the filtered env when not already set. Env vars always take priority.
+- **Credentials** use a single env var `CODECANARY_PROVIDER_SECRET` for all providers. Stored via `go-keyring` (OS keychain) with a file-based fallback (`~/.codecanary/credentials.json`, mode `0600`). `resolveEnv()` in `runner.go` injects the stored credential into the filtered env when not already set.
 
 ## Rules
 
@@ -128,7 +128,7 @@ There is a **single `Run()` function** — not separate paths for GitHub vs. loc
 - **Shared types for similar providers.** OpenAI-compatible APIs share request/response types via `provider_compat.go`. Don't duplicate HTTP client logic across providers.
 - **Don't repeat yourself.** Before writing new code, search the codebase for existing functions, mappings, or logic that already does what you need — then call it instead of reimplementing it. This applies to everything: switch statements, helper functions, validation logic, data mappings, HTTP calls. One source of truth, callers import it. Don't merge scaffolding or unused exports — if it's not called yet, it doesn't ship yet.
 - **File names are ownership boundaries.** A function defined in `local.go` implies it belongs to the local flow; one in `github.go` implies it belongs to GitHub. If a function is called by multiple files in the same package, it belongs in a shared file (e.g., `forms.go` for setup helpers, `platform.go` for platform-shared logic). Never define shared infrastructure in a flow-specific file — move it to the file that matches its actual scope.
-- **Canonical provider registration points.** Provider names live in the factory map in `provider.go`. Provider-to-env-var mapping lives in `providerEnvVars` in `internal/credentials/keyring.go`. When adding a new provider, update both of these plus config validation in `config.go` — don't add ad-hoc mappings elsewhere.
+- **Canonical provider registration points.** Provider names live in the factory map in `provider.go`. All providers use `CODECANARY_PROVIDER_SECRET` for credentials (defined in `internal/credentials/keyring.go`). When adding a new provider, register a `ProviderFactory` in `provider.go` and add config validation in `config.go`.
 - **Minimize shell code.** `install.sh` and the GitHub Action (`alansikora/codecanary-action`) should be kept as thin as possible. All logic must live in Go.
 - **Keep the workflow template in sync.** `internal/setup/workflow.go` contains the embedded workflow template. Any change to `.github/workflows/codecanary.yml` (actions, steps, permissions, etc.) must also be applied to that template, and vice versa.
 - **Keep the breaking-change manifest in sync.** `.github/workflows/breaking-change-check.yml` contains a manifest of user-facing files. When adding new user-facing surfaces (config fields, CLI flags, public endpoints, etc.), add them to the manifest.
