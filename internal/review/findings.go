@@ -142,3 +142,56 @@ func FilterNonActionable(findings []Finding) []Finding {
 	}
 	return kept
 }
+
+// maxSalvageScan limits how far back ParseFindingsSalvage scans from the end
+// of the truncated output. A single JSON finding is typically under 1 KB, so
+// 8 KB is enough to find the last complete object without doing O(n²) work
+// on very large responses.
+const maxSalvageScan = 8192
+
+// ParseFindingsSalvage attempts to recover complete findings from a truncated
+// JSON response. It locates the JSON array, then scans backwards from the
+// truncation point to find the longest valid JSON prefix that parses.
+func ParseFindingsSalvage(output string) ([]Finding, error) {
+	// Find the start of the JSON array inside a ```json fence.
+	fenceStart := strings.Index(output, "```json")
+	if fenceStart < 0 {
+		return nil, fmt.Errorf("no ```json fence found")
+	}
+	nl := strings.Index(output[fenceStart:], "\n")
+	if nl < 0 {
+		return nil, fmt.Errorf("no newline after ```json fence")
+	}
+	searchFrom := fenceStart + nl + 1
+	arrStart := strings.Index(output[searchFrom:], "[")
+	if arrStart < 0 {
+		return nil, fmt.Errorf("no JSON array found")
+	}
+	arrStart += searchFrom
+	body := output[arrStart:]
+
+	// Limit the backward scan to avoid O(n²) on large responses.
+	scanFrom := len(body) - 1
+	scanTo := 0
+	if scanFrom-maxSalvageScan > scanTo {
+		scanTo = scanFrom - maxSalvageScan
+	}
+
+	// Walk backwards looking for a "}" that lets us close the array cleanly.
+	// Note: this doesn't track string boundaries, so } inside JSON string
+	// values (e.g. code snippets) will trigger false candidates and wasted
+	// Unmarshal attempts. A forward bracket-matched pass would avoid this but
+	// adds complexity for a rare fallback path. Worst case: salvage fails and
+	// the caller proceeds with no findings (truncation warning is shown).
+	for i := scanFrom; i >= scanTo; i-- {
+		if body[i] != '}' {
+			continue
+		}
+		candidate := strings.TrimRight(body[:i+1], ", \t\n\r") + "]"
+		var findings []Finding
+		if err := json.Unmarshal([]byte(candidate), &findings); err == nil && len(findings) > 0 {
+			return findings, nil
+		}
+	}
+	return nil, fmt.Errorf("could not salvage any complete findings")
+}
