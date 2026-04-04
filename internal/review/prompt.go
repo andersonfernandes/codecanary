@@ -102,8 +102,8 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int, projectDocs map[
 	b.WriteString("  - \"suggestion\": Better patterns, readability improvements.\n")
 	b.WriteString("  - \"nitpick\": Minor style, naming, formatting.\n")
 	b.WriteString("- `title` (string): A short title for the finding.\n")
-	b.WriteString("- `description` (string): A detailed explanation of the issue.\n")
-	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement. For suggestions about broader patterns, structural concerns, or improvements that go beyond the scope of the current PR, recommend that the author discuss with the team or open a separate PR — do not imply they should fix it in this PR.\n")
+	b.WriteString("- `description` (string): A concise explanation of the issue — 2-3 sentences max. State what is wrong and why it matters. Do not repeat the code or walk through the logic step by step.\n")
+	b.WriteString("- `suggestion` (string, optional): A concise suggested fix — 1-2 sentences of prose, then a code block if helpful. Do not explain what the code block does. For suggestions about broader patterns or improvements beyond the current PR scope, recommend opening a separate PR — do not imply they should fix it here.\n")
 	first := startIndex + 1
 	fixRefPrefix := fmt.Sprintf("%d", pr.Number)
 	if pr.Number == 0 {
@@ -115,7 +115,7 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int, projectDocs map[
 	b.WriteString("\n**Do not include findings where your conclusion is that the code is correct or no action is needed.** If you evaluate something and determine it is fine, omit it entirely rather than reporting it. Specifically: if you begin analyzing a potential issue but then realize the code handles it correctly, do NOT emit a finding that walks through the concern and then concludes \"this is actually fine\" or \"no bug here\" — simply drop it. Every finding you emit must represent a real, actionable problem.\n")
 	b.WriteString("\n**CRITICAL: Do NOT invent or hallucinate file paths, function names, or code that does not appear in the diff or the provided file contents. If a file or function is not shown above, do not reference it.**\n")
 	b.WriteString("\nIf there are no findings, return an empty array: `[]`.\n")
-	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"Detailed description.\",\n    \"suggestion\": \"Consider doing X instead.\",\n")
+	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"The value is used after the error check, so a non-nil error silently proceeds with stale data.\",\n    \"suggestion\": \"Return early on error.\\n\\n```go\\nif err != nil {\\n    return err\\n}\\n```\",\n")
 	fmt.Fprintf(&b, "    \"fix_ref\": \"%s-%d\",\n    \"actionable\": true\n  }\n]\n```\n", fixRefPrefix, first)
 
 	return b.String()
@@ -278,8 +278,8 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	b.WriteString("  - \"suggestion\": Better patterns, readability improvements.\n")
 	b.WriteString("  - \"nitpick\": Minor style, naming, formatting.\n")
 	b.WriteString("- `title` (string): A short title for the finding.\n")
-	b.WriteString("- `description` (string): A detailed explanation of the issue.\n")
-	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement. For suggestions about broader patterns, structural concerns, or improvements that go beyond the scope of the current PR, recommend that the author discuss with the team or open a separate PR — do not imply they should fix it in this PR.\n")
+	b.WriteString("- `description` (string): A concise explanation of the issue — 2-3 sentences max. State what is wrong and why it matters. Do not repeat the code or walk through the logic step by step.\n")
+	b.WriteString("- `suggestion` (string, optional): A concise suggested fix — 1-2 sentences of prose, then a code block if helpful. Do not explain what the code block does. For suggestions about broader patterns or improvements beyond the current PR scope, recommend opening a separate PR — do not imply they should fix it here.\n")
 	first := startIndex + 1
 	fixRefPrefix := fmt.Sprintf("%d", prNumber)
 	if prNumber == 0 {
@@ -291,7 +291,7 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	b.WriteString("\n**Do not include findings where your conclusion is that the code is correct or no action is needed.** If you evaluate something and determine it is fine, omit it entirely rather than reporting it. Specifically: if you begin analyzing a potential issue but then realize the code handles it correctly, do NOT emit a finding that walks through the concern and then concludes \"this is actually fine\" or \"no bug here\" — simply drop it. Every finding you emit must represent a real, actionable problem.\n")
 	b.WriteString("\n**CRITICAL: Do NOT invent or hallucinate file paths, function names, or code that does not appear in the diff or the provided file contents. If a file or function is not shown above, do not reference it.**\n")
 	b.WriteString("\nOnly report NEW issues found in the incremental diff. If there are no new findings, return an empty array: `[]`.\n")
-	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"Detailed description.\",\n    \"suggestion\": \"Consider doing X instead.\",\n")
+	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"The value is used after the error check, so a non-nil error silently proceeds with stale data.\",\n    \"suggestion\": \"Return early on error.\\n\\n```go\\nif err != nil {\\n    return err\\n}\\n```\",\n")
 	fmt.Fprintf(&b, "    \"fix_ref\": \"%s-%d\",\n    \"actionable\": true\n  }\n]\n```\n", fixRefPrefix, first)
 
 	return b.String()
