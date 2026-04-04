@@ -486,13 +486,18 @@ func runTriage(
 	}
 
 	// Phase 1: Go-driven triage — classify threads.
-	reevalDiff := incrementalDiff
+	// Two diffs serve different purposes:
+	//   activityDiff (incremental): decides whether to skip — when empty, threads
+	//     with no new activity are TriageSkip (no LLM cost).
+	//   contextDiff (pr.Diff): determines classification (code-changed vs cross-file)
+	//     and provides FileDiff/FileSnippet for evaluation. Using the full PR diff
+	//     ensures fixes from earlier pushes are visible to the evaluator.
+	activityDiff := incrementalDiff
 	if diffErr != nil {
-		reevalDiff = pr.Diff
+		activityDiff = pr.Diff
 	}
-
 	botLogin := platform.ExcludedAuthor(reviewThreads)
-	triaged := ClassifyThreads(reviewThreads, reevalDiff, botLogin, pr.Files, pr.FileContents)
+	triaged := ClassifyThreads(reviewThreads, activityDiff, pr.Diff, botLogin, pr.Files, pr.FileContents)
 
 	var fixed []fixedThread
 
