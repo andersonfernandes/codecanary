@@ -11,8 +11,9 @@ func init() {
 	providers["openrouter"] = ProviderFactory{
 		New:      newOpenRouterProvider,
 		Validate: validateOpenRouter,
-		// No pricing entries — OpenRouter proxies other providers' models,
-		// which are matched by substring from those providers' pricing tables.
+		// No pricing or MaxOutputTokens entries — OpenRouter proxies other
+		// providers' models, which are matched by substring from those
+		// providers' tables.
 		SuggestedReviewModel: "anthropic/claude-sonnet-4-6",
 		SuggestedTriageModel: "anthropic/claude-haiku-4-5-20251001",
 	}
@@ -48,7 +49,7 @@ func (p *openrouterProvider) Run(ctx context.Context, prompt string, opts RunOpt
 		return nil, fmt.Errorf("API key not found: set %s or run `codecanary setup local`", p.keyEnv)
 	}
 
-	chatResp, durationMS, err := doChat(ctx, "https://openrouter.ai/api/v1", apiKey, p.model, prompt, opts.Timeout)
+	chatResp, durationMS, truncated, err := doChat(ctx, "https://openrouter.ai/api/v1", apiKey, p.model, prompt, opts.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,8 @@ func (p *openrouterProvider) Run(ctx context.Context, prompt string, opts RunOpt
 	}
 
 	return &claudeResult{
-		Text:  text,
-		Usage: usage,
+		Text:      text,
+		Usage:     usage,
+		Truncated: truncated,
 	}, nil
 }

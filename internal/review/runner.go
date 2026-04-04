@@ -76,6 +76,7 @@ type claudeResult struct {
 	Usage       CallUsage
 	ModelUsages []CallUsage // per-model breakdown from modelUsage map
 	DurationMS  int
+	Truncated   bool // true when the response hit the output token limit
 }
 
 // fixedThread holds the index and resolution reason for a fixed thread.
@@ -315,6 +316,9 @@ func Run(opts RunOptions) error {
 			return err
 		}
 		trackUsage(tracker, claudeOut, "review")
+		if claudeOut.Truncated {
+			Stderrf(ansiYellow, "Warning: review response was truncated — findings may be incomplete\n")
+		}
 
 		findings, err = processFindings(claudeOut.Text, pr.Files, isIncremental)
 		if err != nil {

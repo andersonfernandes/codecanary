@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -33,6 +34,13 @@ type PricingEntry struct {
 	Pricing   modelPricing
 }
 
+// MaxTokensEntry maps a model name substring to its maximum output token limit.
+// Matched the same way as PricingEntry — first substring match wins.
+type MaxTokensEntry struct {
+	Substring      string
+	MaxOutputTokens int
+}
+
 // AppRequirement describes an external app (e.g. a GitHub App) that must be
 // installed for a provider to work. Used by the setup wizard to prompt the user.
 type AppRequirement struct {
@@ -55,10 +63,43 @@ type ProviderFactory struct {
 	New                  func(mc *ModelConfig, env []string) ModelProvider
 	Validate             func(mc *ModelConfig) error
 	Pricing              []PricingEntry
+	MaxOutputTokens      []MaxTokensEntry
 	SuggestedReviewModel string
 	SuggestedTriageModel string
 	AppRequirement       *AppRequirement
 	OAuthConfig          *OAuthConfig
+}
+
+// defaultMaxOutputTokens is used when a model is not in any provider's
+// MaxOutputTokens table. Conservative enough to work with most models.
+const defaultMaxOutputTokens = 16384
+
+// lookupMaxOutputTokens returns the maximum output token limit for a model.
+// Searches each provider's MaxOutputTokens entries by substring match.
+// Returns defaultMaxOutputTokens and warns once if the model is unknown.
+func lookupMaxOutputTokens(model string) int {
+	lower := strings.ToLower(model)
+	for _, name := range providerNames() {
+		pf := providers[name]
+		for _, entry := range pf.MaxOutputTokens {
+			if strings.Contains(lower, entry.Substring) {
+				return entry.MaxOutputTokens
+			}
+		}
+	}
+	if model != "" {
+		warnedMu.Lock()
+		key := "max_tokens:" + model
+		alreadyWarned := warnedModels[key]
+		if !alreadyWarned {
+			warnedModels[key] = true
+		}
+		warnedMu.Unlock()
+		if !alreadyWarned {
+			fmt.Fprintf(os.Stderr, "Warning: unknown model %q — using default max output tokens (%d)\n", model, defaultMaxOutputTokens)
+		}
+	}
+	return defaultMaxOutputTokens
 }
 
 // providers maps provider names to their factories.
