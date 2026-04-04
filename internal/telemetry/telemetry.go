@@ -52,6 +52,7 @@ var uuidV4Re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][
 var (
 	installOnce sync.Once
 	installID   string
+	firstRun    bool
 )
 
 // getOrCreateID returns a persistent anonymous UUID.
@@ -79,8 +80,8 @@ func getOrCreateID() string {
 		}
 		_ = os.MkdirAll(dir, 0o755)
 		_ = os.WriteFile(path, []byte(id+"\n"), 0o600)
-		fmt.Fprintf(os.Stderr, "Anonymous telemetry is on. Opt out: CODECANARY_NO_TELEMETRY=1\n")
 		installID = id
+		firstRun = true
 	})
 	return installID
 }
@@ -106,6 +107,13 @@ func newUUIDv4() (string, error) {
 }
 
 // ---------- Opt-out ----------
+
+// IsFirstRun reports whether the current process just created a new
+// installation ID (i.e. this is the very first run on this machine).
+// Must be called after SendSetup or SendReview to get a meaningful result.
+func IsFirstRun() bool {
+	return firstRun
+}
 
 // Enabled returns false when the user has opted out via environment variables.
 func Enabled() bool {

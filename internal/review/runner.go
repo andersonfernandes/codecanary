@@ -414,7 +414,7 @@ func runTriage(
 	// base-branch changes, producing misleading reviews.
 	ancestor, ancestorErr := isAncestor(previousSHA)
 	if ancestorErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not check ancestry of %s: %v\n", shortSHA(previousSHA), ancestorErr)
+		fmt.Fprintf(os.Stderr, "Warning: could not check ancestry of %s: %v — treating as rebase\n", shortSHA(previousSHA), ancestorErr)
 	}
 	// Treat git failures the same as a confirmed rebase: skip the incremental
 	// diff which could be misleading if the SHA exists but ancestry is unknown.
@@ -423,7 +423,7 @@ func runTriage(
 	var incrementalDiff string
 	var diffErr error
 
-	if rebased {
+	if rebased && ancestorErr == nil {
 		Stderrf(ansiYellow, "Rebase detected (base %s is no longer an ancestor of HEAD)\n", shortSHA(previousSHA))
 	} else {
 		// Compute incremental diff via the platform adapter.
