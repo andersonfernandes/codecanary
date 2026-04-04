@@ -13,11 +13,12 @@ import (
 type ThreadClassification int
 
 const (
-	TriageSkip             ThreadClassification = iota // no code changes at all
-	TriageCodeChanged                                  // diff touches finding location (outdated)
-	TriageHasReply                                     // thread has human replies
-	TriageCodeChangedReply                             // both code changed AND has replies
-	TriageCrossFileChange                              // diff has changes but NOT in this thread's file
+	TriageSkip               ThreadClassification = iota // no code changes at all
+	TriageCodeChanged                                    // diff touches finding location (outdated)
+	TriageHasReply                                       // thread has human replies
+	TriageCodeChangedReply                               // both code changed AND has replies
+	TriageCrossFileChange                                // diff has changes but NOT in this thread's file
+	TriageFileRemovedFromPR                              // file no longer in the PR
 )
 
 // TriagedThread pairs a ReviewThread with its classification and context.
@@ -71,10 +72,29 @@ func ExtractFileDiff(fullDiff, filePath string) string {
 }
 
 // ClassifyThreads triages unresolved threads using GitHub's outdated flag and reply presence.
-func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []TriagedThread {
+// prFiles is the current set of files in the PR; threads on files no longer in the PR
+// are classified as TriageFileRemovedFromPR and auto-resolved without an LLM call.
+func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string, prFiles []string) []TriagedThread {
+	prFileSet := make(map[string]bool, len(prFiles))
+	for _, f := range prFiles {
+		prFileSet[f] = true
+	}
+
 	result := make([]TriagedThread, len(threads))
 
 	for i, t := range threads {
+		// File no longer in the PR — auto-resolve without LLM.
+		// When prFiles is empty (e.g. upstream fetch returned no file list),
+		// we skip this check to avoid incorrectly resolving all threads.
+		if len(prFileSet) > 0 && !prFileSet[t.Path] {
+			result[i] = TriagedThread{
+				Thread: t,
+				Index:  i,
+				Class:  TriageFileRemovedFromPR,
+			}
+			continue
+		}
+
 		hasReply := hasNewHumanReply(t, botLogin)
 		outdated := t.Outdated
 		deleted := fileDeletedInDiff(fullDiff, t.Path)
@@ -391,7 +411,7 @@ func EvaluateThreadsParallel(triaged []TriagedThread, provider ModelProvider, cf
 	var wg sync.WaitGroup
 
 	for i, t := range triaged {
-		if t.Class == TriageSkip {
+		if t.Class == TriageSkip || t.Class == TriageFileRemovedFromPR {
 			results[i] = ThreadResolution{Index: t.Index, Resolved: false}
 			continue
 		}
@@ -476,26 +496,32 @@ func LogTriage(triaged []TriagedThread) {
 			fmt.Fprintf(os.Stderr, "  [evaluate] %s — code changes + human reply detected\n", label)
 		case TriageCrossFileChange:
 			fmt.Fprintf(os.Stderr, "  [evaluate] %s — cross-file changes detected\n", label)
+		case TriageFileRemovedFromPR:
+			fmt.Fprintf(os.Stderr, "  [resolve]  %s — file removed from PR\n", label)
 		}
 	}
 
 	skipped := 0
+	autoResolved := 0
 	needsEval := 0
 	for _, t := range triaged {
-		if t.Class == TriageSkip {
+		switch t.Class {
+		case TriageSkip:
 			skipped++
-		} else {
+		case TriageFileRemovedFromPR:
+			autoResolved++
+		default:
 			needsEval++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "\nTriage result: %d skipped, %d need evaluation\n", skipped, needsEval)
+	fmt.Fprintf(os.Stderr, "\nTriage result: %d skipped, %d auto-resolved, %d need evaluation\n", skipped, autoResolved, needsEval)
 }
 
 // LogResolutions prints structured evaluation results to stderr.
 func LogResolutions(triaged []TriagedThread, resolutions []ThreadResolution) {
 	fmt.Fprintf(os.Stderr, "\n")
 	for i, r := range resolutions {
-		if triaged[i].Class == TriageSkip {
+		if triaged[i].Class == TriageSkip || triaged[i].Class == TriageFileRemovedFromPR {
 			continue
 		}
 		label := threadLabel(triaged[i].Thread)
@@ -524,11 +550,11 @@ func LogResolutions(triaged []TriagedThread, resolutions []ThreadResolution) {
 	}
 }
 
-// countNonSkipped returns the number of triaged threads that need evaluation.
+// countNonSkipped returns the number of triaged threads that need LLM evaluation.
 func countNonSkipped(triaged []TriagedThread) int {
 	n := 0
 	for _, t := range triaged {
-		if t.Class != TriageSkip {
+		if t.Class != TriageSkip && t.Class != TriageFileRemovedFromPR {
 			n++
 		}
 	}

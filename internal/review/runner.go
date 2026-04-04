@@ -447,14 +447,14 @@ func runTriage(
 	}
 
 	botLogin := platform.ExcludedAuthor(reviewThreads)
-	triaged := ClassifyThreads(reviewThreads, reevalDiff, botLogin)
+	triaged := ClassifyThreads(reviewThreads, reevalDiff, botLogin, pr.Files)
 
 	var fixed []fixedThread
 
 	if opts.DryRun {
 		LogTriage(triaged)
 		for _, t := range triaged {
-			if t.Class == TriageSkip {
+			if t.Class == TriageSkip || t.Class == TriageFileRemovedFromPR {
 				continue
 			}
 			fmt.Print("\n---\n\n")
@@ -463,15 +463,28 @@ func runTriage(
 		fmt.Print("\n---\n\n")
 	} else {
 		LogTriage(triaged)
+
+		// Pre-evaluation: auto-resolve file-removed threads (Go-only, no LLM).
+		for _, t := range triaged {
+			if t.Class == TriageFileRemovedFromPR {
+				fixed = append(fixed, fixedThread{Index: t.Index, Reason: "file_removed"})
+			}
+		}
+		if len(fixed) > 0 {
+			platform.HandleResolutions(reviewThreads, fixed)
+		}
+
+		// LLM evaluation for remaining threads.
 		needsEval := countNonSkipped(triaged)
 		if needsEval > 0 {
 			resolutions := EvaluateThreadsParallel(triaged, triageProvider, cfg, 3, tracker, cfg.MaxBudgetUSD)
 			LogResolutions(triaged, resolutions)
-			fixed = toFixedThreads(resolutions)
-
-			// Delegate resolution handling to the platform adapter.
-			platform.HandleResolutions(reviewThreads, fixed)
-		} else {
+			llmFixed := toFixedThreads(resolutions)
+			if len(llmFixed) > 0 {
+				platform.HandleResolutions(reviewThreads, llmFixed)
+				fixed = append(fixed, llmFixed...)
+			}
+		} else if len(fixed) == 0 {
 			fmt.Fprintf(os.Stderr, "No threads need re-evaluation — skipping Claude\n")
 		}
 	}
@@ -481,12 +494,12 @@ func runTriage(
 	}
 
 	// Phase 2: Build review prompt for new findings.
-	// Only code_change threads are truly resolved. Other reasons
+	// code_change and file_removed threads are truly resolved. Other reasons
 	// (dismissed, acknowledged, rebutted) stay in unresolved so they
 	// get re-triaged on future pushes.
 	fixedSet := make(map[int]bool, len(fixed))
 	for _, f := range fixed {
-		if f.Index >= 0 && f.Index < len(reviewThreads) && f.Reason == "code_change" {
+		if f.Index >= 0 && f.Index < len(reviewThreads) && isTrueResolution(f.Reason) {
 			fixedSet[f.Index] = true
 		}
 	}
@@ -501,6 +514,8 @@ func runTriage(
 	}
 
 	// Build resolved context for the incremental review prompt (anti-ping-pong).
+	// Only include code_change resolutions — file_removed threads reference
+	// files no longer in the PR and would confuse the model.
 	var resolvedCtx []ResolvedContext
 	for _, f := range fixed {
 		if f.Index >= 0 && f.Index < len(reviewThreads) && f.Reason == "code_change" {
@@ -571,6 +586,13 @@ func loadReviewConfig(configPath string) (*ReviewConfig, error) {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
 	return cfg, nil
+}
+
+// isTrueResolution returns true for resolution reasons that fully close a thread.
+// code_change and file_removed are true resolutions. Other reasons (dismissed,
+// acknowledged, rebutted) keep the thread open for re-triage.
+func isTrueResolution(reason string) bool {
+	return reason == "code_change" || reason == "file_removed"
 }
 
 // shortSHA returns the first 8 characters of a SHA, or the full string if shorter.
