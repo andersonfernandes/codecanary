@@ -85,7 +85,30 @@ func InputAPIKey(provider string) (string, error) {
 // The credential is always validated before being returned.
 func CollectCredential(provider string) (string, error) {
 	if oauthCfg := review.GetOAuthConfig(provider); oauthCfg != nil {
-		token, err := auth.OAuthToken(oauthCfg.ClientID, oauthCfg.AuthorizeURL, oauthCfg.TokenURL, oauthCfg.Scope)
+		var loginHint string
+		if err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Account email (optional)").
+					Description("Pre-fill the login page with this email. Leave blank to use your current session.").
+					Validate(func(s string) error {
+						s = strings.TrimSpace(s)
+						if s == "" {
+							return nil
+						}
+						if !strings.Contains(s, "@") {
+							return fmt.Errorf("must be a valid email address")
+						}
+						return nil
+					}).
+					Value(&loginHint),
+			),
+		).Run(); err != nil {
+			return "", err
+		}
+		loginHint = strings.TrimSpace(loginHint)
+
+		token, err := auth.OAuthToken(oauthCfg.ClientID, oauthCfg.AuthorizeURL, oauthCfg.TokenURL, oauthCfg.Scope, loginHint)
 		if err != nil {
 			return "", fmt.Errorf("OAuth authentication failed: %w", err)
 		}
