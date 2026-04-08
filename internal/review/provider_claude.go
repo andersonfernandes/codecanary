@@ -32,6 +32,7 @@ func init() {
 		SuggestedTriageModel: "haiku",
 		AppRequirement: &AppRequirement{
 			Name:       "Claude",
+			AppSlug:    "claude",
 			InstallURL: "https://github.com/apps/claude/installations/new",
 		},
 		OAuthConfig: &OAuthConfig{
