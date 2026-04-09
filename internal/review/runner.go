@@ -472,6 +472,10 @@ func Run(opts RunOptions) error {
 	}
 
 	// 11. Report usage.
+	prDiffForSize := pr.ValidationDiff()
+	linesAdded, linesRemoved := countDiffLines(prDiffForSize)
+	filesChanged := len(FilesFromDiff(prDiffForSize))
+	tracker.SetPRSize(linesAdded, linesRemoved, filesChanged)
 	platform.ReportUsage(tracker)
 
 	// 12. Anonymous telemetry (fire-and-forget).
@@ -499,6 +503,9 @@ func Run(opts RunOptions) error {
 			Provider:          cfg.Provider,
 			Platform:          platformName,
 			IsIncremental:     isIncremental,
+			LinesAdded:        linesAdded,
+			LinesRemoved:      linesRemoved,
+			FilesChanged:      filesChanged,
 			NewFindings:       len(result.Findings),
 			StillOpenFindings: len(result.StillOpen),
 			BySeverity:        bySeverity,
