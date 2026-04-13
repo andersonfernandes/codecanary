@@ -39,57 +39,70 @@ If you cannot tell which mode applies, ask the operator before starting.
 
 ## The loop
 
-Track two pieces of state across iterations:
+Track one piece of state across iterations:
 - `CYCLE` — integer, starts at 0, increments at the top of every iteration.
-- `LAST_COMMIT` — the commit SHA whose findings you've already triaged.
-  Starts empty.
 
 ### Iteration
 
 1. `CYCLE = CYCLE + 1`.
 2. Fetch findings:
    - **PR mode**: run
-     `codecanary findings --watch --since-commit "$LAST_COMMIT" --output json`
-     (omit `--since-commit` on the first iteration). The command blocks
-     until the review check completes; its stdout is a single JSON object.
-     Parse it.
+     `codecanary findings --watch --output json`.
+     The command blocks until the review check completes; its stdout is
+     a single JSON object. Parse it. Deduplication is handled by GitHub
+     thread resolution — resolved threads are excluded by default.
+     Note: findings the operator previously skipped (via "Skip this
+     cycle" or "Apply some") will re-appear if their threads are still
+     open. This is intentional — skipped findings are deferred, not
+     dismissed.
    - **Local mode**: run `codecanary review --output json`. The command
      runs the review inline; its stdout is a JSON object with a
      `findings` array in the same shape.
-3. If the findings list is empty, tell the operator the review is clean
-   and exit. Do not loop further.
-4. If `CYCLE > 1`, emit this reminder to the operator verbatim, before
-   the triage table:
+3. **PR mode only** — check the `conclusion` field in the JSON output.
+   (Skip this step entirely for local mode — there is no check run.)
+   If `conclusion` is `failure`, the review run itself broke. If
+   `conclusion` is `cancelled` or `timed_out`, the run was interrupted
+   (e.g. a newer push superseded it). In any of these cases — or any
+   value other than `success` / `neutral` / empty — tell the operator
+   the check failed, name the conclusion, and stop. Do not say the
+   review is clean, even if `findings` is empty — an empty list on a
+   failed run means findings were never published, not that the code
+   is fine. Roll `CYCLE` back by one (`CYCLE = CYCLE - 1`) so the
+   next retry starts at the correct count. Wait for the operator to
+   explicitly ask you to retry before starting another cycle.
+4. If the findings list is empty (for either mode), tell the operator
+   the review is clean and exit. Do not loop further.
+5. If `CYCLE > 1`, emit this reminder to the operator before the
+   triage table, substituting *N* with the current value of `CYCLE`:
    > This is review cycle *N*. Before applying fixes, check whether the new
    > findings are caused by your previous fixes or are genuinely different
    > issues. If the bot keeps re-flagging the same `fix_ref` across cycles,
    > stop and verify your fix actually addresses what the bot meant —
    > don't keep patching symptoms.
-5. Render a triage table (Markdown) summarizing the findings:
+6. Render a triage table (Markdown) summarizing the findings:
    - Columns: severity, file:line, fix_ref, title, proposed action
    - One row per finding. Keep proposed actions terse (one line each).
-6. Ask the operator to confirm. Use `AskUserQuestion` with a single
+7. Ask the operator to confirm. Use `AskUserQuestion` with a single
    question whose options are:
    - "Apply all" *(Recommended)*
    - "Apply some (I'll specify which)"
    - "Skip this cycle" — treats all findings as deferred; exits the loop
    - "Abort" — exits the loop immediately
    Wait for the response before touching any files.
-7. If the operator approved (all or some), apply the fixes. For each
+8. If the operator approved (all or some), apply the fixes. For each
    approved finding:
    - Read the file, make the minimal edit that addresses the finding,
      keeping the surrounding code intact (do not "improve" unrelated code).
    - If the suggestion in the finding is an exact code snippet and fits
      the context, prefer it verbatim; otherwise adapt it to the codebase
      conventions (existing imports, types, error-handling style).
-8. Finalize the cycle:
+9. Finalize the cycle:
    - **PR mode**:
      - Run `go build ./...` and `go test ./...` if any Go files changed.
      - Commit with a message like:
        `fix: address codecanary review on #<PR> (cycle <N>)`
        plus a brief bullet list of which findings were addressed.
      - Push the branch.
-     - Set `LAST_COMMIT` to the SHA you just pushed.
      - Go back to step 1.
    - **Local mode**: stop. Report the summary of applied fixes to the
      operator. Do not commit, do not push, do not loop — a single pass
@@ -99,13 +112,16 @@ Track two pieces of state across iterations:
 
 Exit the loop (and tell the operator *why*) whenever any of these hold:
 
-- The findings list comes back empty — normal success.
+- **PR mode**: the findings list comes back empty and `conclusion` is
+  healthy (`success` or `neutral`) — normal success.
+- **Local mode**: the findings list comes back empty — normal success.
+  (There is no `conclusion` field in local mode; its absence is expected.)
 - The operator chose "Skip this cycle" or "Abort".
 - The CLI errors out (network failure, no PR detected, timeout on
   `--watch`). Surface the error verbatim and stop.
 - You detect you're in a stable disagreement loop: the same `fix_ref`
   values appear in two consecutive cycles after you applied fixes for
-  them. This is the signal from step 4 turning into a hard stop — tell
+  them. This is the signal from step 5 turning into a hard stop — tell
   the operator which fix_refs keep re-emerging and ask them to review
   whether the fix is correct before continuing.
 
