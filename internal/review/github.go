@@ -703,19 +703,56 @@ func GetIncrementalDiff(baseSHA string) (string, error) {
 	return string(out), nil
 }
 
-// PostCleanReview posts a review when the first review finds no issues.
-func PostCleanReview(repo string, prNumber int) error {
-	return postSimpleReview(repo, prNumber, "CodeCanary reviewed this PR \u2014 no issues found.")
+// PostCleanReview posts a review when the first review finds no issues. The
+// commitSHA is embedded in a hidden marker so future runs treat it as the
+// baseline for incremental reviews, avoiding a redundant full re-review on the
+// next push.
+func PostCleanReview(repo string, prNumber int, commitSHA string) error {
+	return postSimpleReview(repo, prNumber, buildCleanReviewBody(commitSHA))
 }
 
-// PostAllClearReview posts a review when all previous findings have been resolved.
-// If minimizeFailed is true, a note is appended warning about visible old reviews.
-func PostAllClearReview(repo string, prNumber int, minimizeFailed bool) error {
+// PostAllClearReview posts a review when all previous findings have been
+// resolved. If minimizeFailed is true, a note is appended warning about
+// visible old reviews. The commitSHA is embedded in a hidden marker so future
+// runs treat it as the baseline for incremental reviews; without it, the next
+// push would fall back to reviewing the entire PR again.
+func PostAllClearReview(repo string, prNumber int, commitSHA string, minimizeFailed bool) error {
+	return postSimpleReview(repo, prNumber, buildAllClearReviewBody(commitSHA, minimizeFailed))
+}
+
+// buildCleanReviewBody renders the full Markdown body posted by
+// PostCleanReview. Split out from the poster so tests can assert the exact
+// string that lands on GitHub without having to mock gh.
+func buildCleanReviewBody(commitSHA string) string {
+	return "CodeCanary reviewed this PR \u2014 no issues found." + embedBaselineMarker(commitSHA)
+}
+
+// buildAllClearReviewBody renders the full Markdown body posted by
+// PostAllClearReview. Split out for the same reason as buildCleanReviewBody.
+func buildAllClearReviewBody(commitSHA string, minimizeFailed bool) string {
 	body := "## \U0001F425 CodeCanary\n\n\u2705 All previous findings have been addressed. No new issues found. \u2728"
 	if minimizeFailed {
 		body += "\n\n> \u26A0\uFE0F Some previous review comments could not be minimized and may still be visible."
 	}
-	return postSimpleReview(repo, prNumber, body)
+	return body + embedBaselineMarker(commitSHA)
+}
+
+// embedBaselineMarker returns a hidden HTML comment containing the commitSHA
+// so FetchPreviousReviewSHA can use this review as the incremental baseline.
+// Returns an empty string if commitSHA is empty (local mode, dry run). The
+// marker carries only the SHA — FetchPreviousReviewSHA is the sole reader and
+// it only needs that field.
+func embedBaselineMarker(commitSHA string) string {
+	if commitSHA == "" {
+		return ""
+	}
+	data, err := json.Marshal(struct {
+		SHA string `json:"sha"`
+	}{SHA: commitSHA})
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("\n%s%s%s\n", reviewMarkerPrefixes[0], string(data), reviewMarkerSuffix)
 }
 
 func postSimpleReview(repo string, prNumber int, body string) error {

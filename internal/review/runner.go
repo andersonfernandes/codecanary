@@ -364,7 +364,11 @@ func Run(opts RunOptions) error {
 	var prompt string
 	var fixed []fixedThread
 	var stillOpenFindings []Finding
-	isIncremental := len(reviewThreads) > 0 && previousSHA != ""
+	// A previous SHA alone is enough to enter the incremental path. When
+	// previous findings were all resolved (reviewThreads empty), we still
+	// want to scope the next review to commits since that baseline instead
+	// of re-reviewing the whole PR.
+	isIncremental := previousSHA != ""
 
 	if isIncremental {
 		prompt, fixed, stillOpenFindings = runTriage(
@@ -450,6 +454,13 @@ func Run(opts RunOptions) error {
 	}
 
 	// Handle early return for "no new changes" with no open findings.
+	// This fires when the incremental diff is empty and nothing is carried
+	// forward. Skipping Publish is intentional: there is nothing new to
+	// review and nothing to acknowledge, so emitting another comment would
+	// be noise. The baseline marker stays at the previous review's SHA,
+	// which is the correct comparison point for the next push — an empty
+	// diff means the tree is unchanged, so advancing the baseline would
+	// produce the same incremental diff next time either way.
 	if prompt == "" && len(findings) == 0 && len(stillOpenFindings) == 0 && isIncremental {
 		return nil
 	}
@@ -531,7 +542,11 @@ func runTriage(
 	reviewThreads []ReviewThread, previousSHA string, startIndex int,
 	opts RunOptions,
 ) (string, []fixedThread, []Finding) {
-	Stderrf(ansiBold, "Re-evaluating %d unresolved thread(s) (base %s)...\n", len(reviewThreads), shortSHA(previousSHA))
+	if len(reviewThreads) > 0 {
+		Stderrf(ansiBold, "Re-evaluating %d unresolved thread(s) (base %s)...\n", len(reviewThreads), shortSHA(previousSHA))
+	} else {
+		Stderrf(ansiBold, "Reviewing new commits since %s...\n", shortSHA(previousSHA))
+	}
 
 	// Try to compute an incremental diff (only changes since last review).
 	// This produces a smaller prompt when available. If it fails (e.g. shallow
