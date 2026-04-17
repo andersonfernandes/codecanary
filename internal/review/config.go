@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"gopkg.in/yaml.v3"
 )
 
@@ -91,6 +92,70 @@ type Rule struct {
 	Severity     string   `yaml:"severity"` // One of: critical, bug, warning, suggestion, nitpick
 	Paths        []string `yaml:"paths"`
 	ExcludePaths []string `yaml:"exclude_paths"`
+}
+
+// AppliesToFiles reports whether the rule should be enforced on a review
+// covering the given file set. A rule with no Paths applies to any file. A
+// rule with Paths applies when at least one file matches any include glob
+// and no file-narrowing is needed — ExcludePaths only filter out files that
+// would otherwise match. The check short-circuits on the first matching
+// file, so the cost is O(files × patterns) in the worst case and usually
+// much less. Returns true only when at least one included file survives the
+// exclude filter.
+//
+// An empty file list is treated as "unknown" and returns true — matching the
+// defensive behavior of FilterRules. Silently dropping path-scoped rules in
+// the unknown case could cause a soft-fail that's hard to debug.
+func (r Rule) AppliesToFiles(files []string) bool {
+	if len(r.Paths) == 0 {
+		return true
+	}
+	if len(files) == 0 {
+		return true
+	}
+	for _, f := range files {
+		if !matchesAny(f, r.Paths) {
+			continue
+		}
+		if matchesAny(f, r.ExcludePaths) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// FilterRules returns the rules applicable to the given file set. Preserves
+// input order so severity-sorted configs render predictably.
+func FilterRules(rules []Rule, files []string) []Rule {
+	if len(files) == 0 {
+		return rules
+	}
+	out := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		if r.AppliesToFiles(files) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// matchesAny reports whether path matches any of the glob patterns.
+// Patterns must be written in full-path form using doublestar globs — e.g.
+// `**/*.rb` to match any `.rb` file at any depth, or `app/**/*.rb` to scope
+// to a subtree. Bare-filename patterns like `*.rb` only match files at the
+// repo root; users who want "any .rb file" should write `**/*.rb`.
+//
+// Intentionally stricter than matchesIgnore (github.go): rule path-scoping
+// demands unambiguous matching, since a basename fallback can silently
+// expand a path-scoped pattern to unrelated directories.
+func matchesAny(path string, patterns []string) bool {
+	for _, pat := range patterns {
+		if matched, _ := doublestar.Match(pat, path); matched {
+			return true
+		}
+	}
+	return false
 }
 
 // validSeverities is the set of allowed severity values for rules,
